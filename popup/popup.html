@@ -1,0 +1,111 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevShot</title>
+  <link rel="stylesheet" href="popup.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="logo-title">
+        <img src="../icons/icon-48.png" alt="DevShot" class="logo-img">
+        <h1>DevShot</h1>
+      </div>
+      <div class="header-btns">
+        <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
+        <button class="icon-btn" id="btn-gallery" title="Gallery">🖼️</button>
+      </div>
+    </header>
+
+    <!-- Delay Control -->
+    <div class="delay-bar">
+      <span>Wait</span>
+      <select id="delay-select">
+        <option value="0">0s</option>
+        <option value="2000">2s</option>
+        <option value="3000" selected>3s</option>
+        <option value="5000">5s</option>
+      </select>
+      <span>before capture</span>
+    </div>
+
+    <!-- Main Actions -->
+    <div class="actions">
+      <!-- Desktop Row -->
+      <div class="action-row">
+        <span class="row-label">🖥️ Desktop</span>
+        <button class="action-btn" id="btn-viewport">Viewport</button>
+        <button class="action-btn" id="btn-fullpage">Full Page</button>
+      </div>
+
+      <!-- Mobile Row -->
+      <div class="action-row">
+        <span class="row-label">📱 Mobile</span>
+        <button class="action-btn" id="btn-mobile-viewport">Viewport</button>
+        <button class="action-btn" id="btn-mobile-fullpage">Full Page</button>
+      </div>
+
+      <!-- Tablet Row -->
+      <div class="action-row">
+        <span class="row-label">📱 Tablet</span>
+        <button class="action-btn" id="btn-tablet-viewport">Viewport</button>
+        <button class="action-btn" id="btn-tablet-fullpage">Full Page</button>
+      </div>
+    </div>
+
+    <!-- Bundle Button -->
+    <button class="bundle-btn" id="btn-bundle">
+      📦 Capture All 6
+    </button>
+
+    <!-- Batch URLs Button -->
+    <button class="batch-btn" id="btn-batch-urls">
+      🌐 Batch URLs
+    </button>
+
+    <!-- Status -->
+    <div class="status" id="status"></div>
+
+    <!-- Batch URLs Modal -->
+    <div class="batch-modal" id="batch-modal">
+      <div class="batch-modal-content">
+        <div class="batch-header">
+          <h3>🌐 Batch Website Capture</h3>
+          <button class="batch-close" id="batch-close">✕</button>
+        </div>
+        <div class="batch-body">
+          <textarea id="batch-urls" placeholder="Enter URLs (one per line)&#10;https://example.com&#10;https://google.com" rows="4"></textarea>
+          
+          <div class="capture-types">
+            <label class="capture-type-label">Capture Types:</label>
+            <div class="capture-checkboxes">
+              <label class="capture-cb"><input type="checkbox" id="cb-desktop-viewport" checked> 🖥️ Desktop V</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-desktop-fullpage"> 🖥️ Desktop F</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-mobile-viewport" checked> 📱 Mobile V</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-mobile-fullpage"> 📱 Mobile F</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-tablet-viewport"> 📲 Tablet V</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-tablet-fullpage"> 📲 Tablet F</label>
+            </div>
+            <div class="quick-select">
+              <button type="button" class="quick-btn" id="select-all-types">All 6</button>
+              <button type="button" class="quick-btn" id="select-viewports">Viewports</button>
+              <button type="button" class="quick-btn" id="select-none">None</button>
+            </div>
+          </div>
+          
+          <div class="batch-progress" id="batch-progress"></div>
+        </div>
+        <div class="batch-footer">
+          <button class="btn-cancel" id="batch-cancel">Cancel</button>
+          <button class="btn-start" id="batch-start">🚀 Start</button>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script src="popup.js"></script>
+</body>
+</html>

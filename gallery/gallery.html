@@ -1,0 +1,89 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>DevShot Gallery</title>
+  <link rel="stylesheet" href="gallery.css">
+</head>
+<body>
+  <div class="app">
+    <!-- Header -->
+    <header class="header">
+      <div class="header-left">
+        <img src="../icons/icon-48.png" alt="DevShot" class="logo-img">
+        <h1 class="logo-text">DevShot Gallery</h1>
+      </div>
+      <div class="header-right">
+        <button class="btn btn-secondary" id="btn-refresh">
+          <span>🔄</span> Refresh
+        </button>
+        <button class="btn btn-primary" id="btn-download-all">
+          <span>📥</span> Download All
+        </button>
+      </div>
+    </header>
+
+    <!-- Toolbar -->
+    <div class="toolbar">
+      <div class="toolbar-left">
+        <label class="checkbox-label">
+          <input type="checkbox" id="select-all">
+          <span>Select All</span>
+        </label>
+        <button class="btn btn-sm btn-danger" id="btn-delete-selected" disabled>
+          <span>🗑️</span> Delete Selected
+        </button>
+        <button class="btn btn-sm btn-secondary" id="btn-download-selected" disabled>
+          <span>📥</span> Download Selected
+        </button>
+        <button class="btn btn-sm btn-accent" id="btn-batch-capture">
+          <span>📷</span> Batch Capture
+        </button>
+        <button class="btn btn-sm btn-primary" id="btn-create-showcase" disabled title="Select 3 screenshots (desktop, tablet, mobile)">
+          <span>🖼️</span> Create Showcase
+        </button>
+        <button class="btn btn-sm btn-accent" id="btn-custom-canvas" disabled title="Select screenshots to place freely">
+          <span>🎨</span> Custom Canvas
+        </button>
+        <button class="btn btn-sm btn-secondary" id="btn-export-pdf" disabled>
+          <span>📄</span> Export PDF
+        </button>
+      </div>
+      <div class="toolbar-right">
+        <select class="select" id="filter-domain">
+          <option value="">All Domains</option>
+        </select>
+        <select class="select" id="filter-type">
+          <option value="">All Types</option>
+          <option value="viewport">Viewport</option>
+          <option value="fullpage">Full Page</option>
+        </select>
+        <select class="select" id="filter-device">
+          <option value="">All Devices</option>
+          <option value="desktop">Desktop</option>
+          <option value="mobile">Mobile</option>
+          <option value="tablet">Tablet</option>
+        </select>
+      </div>
+    </div>
+
+    <!-- Gallery Content -->
+    <main class="gallery-container">
+      <!-- Domain groups will be dynamically inserted here -->
+      <div class="empty-state" id="empty-state">
+        <div class="empty-icon">📷</div>
+        <h2>No Screenshots Yet</h2>
+        <p>Take your first screenshot using the DevShot popup or right-click menu.</p>
+      </div>
+    </main>
+
+    <!-- Footer -->
+    <footer class="footer">
+      <p>DevShot v1.0 • Made with ❤️ for developers</p>
+    </footer>
+  </div>
+
+  <script src="gallery.js"></script>
+</body>
+</html>
