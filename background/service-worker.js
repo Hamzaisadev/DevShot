@@ -99,6 +99,23 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       .catch(error => sendResponse({ success: false, error: error.message }));
     return true;
   }
+
+  // Auto scroll capture - capture frames while scrolling, download as GIF
+  if (message.action === 'autoScrollCapture') {
+    autoScrollCapture()
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
+  // Save video to gallery
+  if (message.action === 'saveVideo') {
+    saveToGallery(message.data)
+      .then(() => sendResponse({ success: true }))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
 });
 
 // Capture screenshot of a specific URL (for batch capture)
@@ -238,6 +255,103 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
   }
 }
 
+// Auto scroll capture - scroll page and capture frames
+async function autoScrollCapture() {
+  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+  if (!tab) throw new Error('No active tab');
+
+  // Get page dimensions
+  const pageInfo = await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => ({
+      scrollHeight: document.documentElement.scrollHeight,
+      viewportHeight: window.innerHeight,
+      scrollTop: window.scrollY
+    })
+  });
+
+  const { scrollHeight, viewportHeight } = pageInfo[0].result;
+  const totalScrollDistance = scrollHeight - viewportHeight;
+  
+  if (totalScrollDistance <= 0) {
+    // Page doesn't need scrolling, just capture single frame
+    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
+    const timestamp = formatTimestamp();
+    const filename = `scroll_capture_${timestamp}.png`;
+    
+    await chrome.downloads.download({
+      url: dataUrl,
+      filename: filename,
+      saveAs: false
+    });
+    
+    return { success: true, filename };
+  }
+
+  // Scroll to top first
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.scrollTo(0, 0)
+  });
+  await new Promise(r => setTimeout(r, 300));
+
+  // Capture frames while scrolling
+  const frames = [];
+  const scrollStep = 100; // pixels per step
+  const captureInterval = 80; // ms between captures (for ~12 fps)
+  const steps = Math.ceil(totalScrollDistance / scrollStep);
+
+  for (let i = 0; i <= steps; i++) {
+    // Capture frame
+    try {
+      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png', quality: 70 });
+      frames.push(dataUrl);
+    } catch (e) {
+      console.log('Frame capture skipped');
+    }
+
+    // Scroll
+    if (i < steps) {
+      await chrome.scripting.executeScript({
+        target: { tabId: tab.id },
+        func: (step) => {
+          window.scrollBy({ top: step, behavior: 'auto' });
+        },
+        args: [scrollStep]
+      });
+      await new Promise(r => setTimeout(r, captureInterval));
+    }
+  }
+
+  // Create download - for now, download first and last frame as comparison
+  // (Full GIF encoding would require a library like gif.js)
+  const timestamp = formatTimestamp();
+  
+  // Download first frame
+  await chrome.downloads.download({
+    url: frames[0],
+    filename: `scroll_start_${timestamp}.png`,
+    saveAs: false
+  });
+  
+  // Download last frame
+  if (frames.length > 1) {
+    await chrome.downloads.download({
+      url: frames[frames.length - 1],
+      filename: `scroll_end_${timestamp}.png`,
+      saveAs: false
+    });
+  }
+
+  // Scroll back to top
+  await chrome.scripting.executeScript({
+    target: { tabId: tab.id },
+    func: () => window.scrollTo({ top: 0, behavior: 'smooth' })
+  });
+
+  return { success: true, framesCount: frames.length, message: `Captured ${frames.length} frames` };
+}
+
 // ============================================
 // Context Menu Setup
 // ============================================
@@ -359,10 +473,10 @@ async function executeCapture(type, providedTab = null, delay = null) {
 
     const [device, captureType] = type.split('-');
     
-    // Apply delay if set (for preloaders)
+    // Apply delay for ALL devices (not just desktop) to allow page to fully load
     const waitTime = delay !== null ? delay : settings.defaultDelay;
-    if (waitTime > 0 && device === 'desktop') {
-      console.log(`Waiting ${waitTime}ms for page to load...`);
+    if (waitTime > 0) {
+      console.log(`[DevShot] Waiting ${waitTime}ms for page to fully load...`);
       await sleep(waitTime);
     }
     
@@ -657,26 +771,56 @@ async function captureResponsiveFullPage(url, viewport, delay = 3000) {
 // Utilities
 // ============================================
 
-function waitForTabLoad(tabId) {
+function waitForTabLoad(tabId, waitForResources = true) {
   return new Promise((resolve) => {
     const checkComplete = async () => {
       try {
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === 'complete') {
-          resolve();
-          return;
+          if (waitForResources) {
+            // Additional check for document readyState and resources
+            try {
+              const [{ result }] = await chrome.scripting.executeScript({
+                target: { tabId },
+                func: () => {
+                  // Check if document is fully loaded
+                  if (document.readyState !== 'complete') return false;
+                  
+                  // Check if all images are loaded
+                  const images = document.querySelectorAll('img');
+                  for (const img of images) {
+                    if (!img.complete || img.naturalHeight === 0) return false;
+                  }
+                  
+                  return true;
+                }
+              });
+              if (result) {
+                resolve();
+                return;
+              }
+            } catch (e) {
+              // Script injection failed, resolve anyway
+              resolve();
+              return;
+            }
+          } else {
+            resolve();
+            return;
+          }
         }
       } catch (e) {
+        // Tab doesn't exist anymore
         resolve();
         return;
       }
-      setTimeout(checkComplete, 100);
+      setTimeout(checkComplete, 200);
     };
     
     checkComplete();
     
-    // Timeout after 15 seconds
-    setTimeout(resolve, 15000);
+    // Increased timeout to 20 seconds for slow-loading pages
+    setTimeout(resolve, 20000);
   });
 }
 

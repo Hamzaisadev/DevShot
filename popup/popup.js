@@ -82,7 +82,7 @@ document.addEventListener('DOMContentLoaded', () => {
     for (let i = 0; i < types.length; i++) {
       showStatus(`Capturing ${i + 1}/6...`, 'loading');
       try {
-        await chrome.runtime.sendMessage({ action: 'capture', type: types[i], delay: i === 0 ? delay : 0 });
+        await chrome.runtime.sendMessage({ action: 'capture', type: types[i], delay });
       } catch (e) {
         console.error(e);
       }
@@ -201,7 +201,7 @@ document.addEventListener('DOMContentLoaded', () => {
             action: 'batchCaptureUrl',
             url: url,
             type: captureType,
-            delay: j === 0 ? delay : 1000 // Only full delay on first type per URL
+            delay: delay // Apply full delay to every capture for proper page loading
           });
           
           if (res?.success) {
@@ -244,6 +244,209 @@ document.addEventListener('DOMContentLoaded', () => {
   batchClose.onclick = hideBatchModal;
   batchCancel.onclick = hideBatchModal;
   batchStart.onclick = startBatchCapture;
+
+  // Auto Scroll Video Capture using chrome.tabCapture
+  const recordBtn = $('btn-record');
+  let isRecording = false;
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let captureStream = null;
+  
+  if (recordBtn) {
+    recordBtn.onclick = async () => {
+      if (isRecording) {
+        // Stop recording
+        if (mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
+        return;
+      }
+
+      try {
+        // Get current tab
+        const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
+        if (!tab) {
+          showStatus('No active tab found', 'error');
+          return;
+        }
+
+        // Use chrome.tabCapture to capture the current tab directly
+        captureStream = await new Promise((resolve, reject) => {
+          chrome.tabCapture.capture({
+            audio: false,
+            video: true,
+            videoConstraints: {
+              mandatory: {
+                chromeMediaSource: 'tab',
+                maxWidth: 1920,
+                maxHeight: 1080,
+                maxFrameRate: 30
+              }
+            }
+          }, (stream) => {
+            if (chrome.runtime.lastError) {
+              reject(new Error(chrome.runtime.lastError.message));
+            } else if (!stream) {
+              reject(new Error('Failed to capture tab'));
+            } else {
+              resolve(stream);
+            }
+          });
+        });
+
+        recordedChunks = [];
+        mediaRecorder = new MediaRecorder(captureStream, {
+          mimeType: 'video/webm;codecs=vp9'
+        });
+
+        mediaRecorder.ondataavailable = (e) => {
+          if (e.data.size > 0) {
+            recordedChunks.push(e.data);
+          }
+        };
+
+        mediaRecorder.onstop = async () => {
+          // Create blob
+          const blob = new Blob(recordedChunks, { type: 'video/webm' });
+          const timestamp = Date.now();
+          
+          // Get domain from tab URL
+          let domain = 'unknown';
+          let pageUrl = '';
+          try {
+            const [currentTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+            if (currentTab?.url) {
+              const urlObj = new URL(currentTab.url);
+              domain = urlObj.hostname;
+              pageUrl = currentTab.url;
+            }
+          } catch (e) {
+            console.log('Could not get tab URL');
+          }
+          
+          const filename = `${domain}_scroll_${timestamp}.webm`;
+          
+          // Convert to dataURL for gallery storage
+          const reader = new FileReader();
+          reader.onloadend = async () => {
+            const dataUrl = reader.result;
+            
+            // Save to gallery via service worker
+            try {
+              await chrome.runtime.sendMessage({
+                action: 'saveVideo',
+                data: {
+                  filename: filename,
+                  domain: domain,
+                  device: 'desktop',
+                  captureType: 'video',
+                  dataUrl: dataUrl,
+                  url: pageUrl,
+                  timestamp: timestamp
+                }
+              });
+              showStatus('Video saved to gallery!', 'success');
+            } catch (e) {
+              console.log('Gallery save failed:', e);
+              showStatus('Save failed', 'error');
+            }
+          };
+          reader.readAsDataURL(blob);
+
+          // Stop capture stream
+          if (captureStream) {
+            captureStream.getTracks().forEach(track => track.stop());
+          }
+
+          // Reset UI
+          isRecording = false;
+          recordBtn.textContent = '🎬 Auto Scroll Video';
+          recordBtn.classList.remove('recording');
+          showStatus('Video saved!', 'success');
+        };
+
+        // Start recording
+        mediaRecorder.start();
+        isRecording = true;
+        recordBtn.textContent = '⏹️ Stop Recording';
+        recordBtn.classList.add('recording');
+
+        // Reload the page first to capture animations
+        await chrome.tabs.reload(tab.id);
+        
+        // Wait for page to load (3 seconds)
+        await new Promise(r => setTimeout(r, 3000));
+
+        // Inject smooth scroll into the page
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          func: () => {
+            // Already at top after reload
+            
+            // Start scroll after animations play (2 sec delay)
+            setTimeout(() => {
+              // Disable CSS smooth scroll to allow fast scrolling
+              document.documentElement.style.scrollBehavior = 'auto';
+              document.body.style.scrollBehavior = 'auto';
+              
+              // ========== ADJUST SPEED HERE ==========
+              const pixelsPerStep = 12;    // Pixels to scroll each step (higher = faster)
+              const intervalMs = 16;       // Milliseconds between steps (16 = 60fps)
+              // ========================================
+              
+              let lastScrollY = -1;
+              let stuckCount = 0;
+              
+              const scrollInterval = setInterval(() => {
+                const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
+                const currentScroll = window.scrollY;
+                
+                // Check if reached bottom
+                if (currentScroll >= maxScroll - 5) {
+                  clearInterval(scrollInterval);
+                  return;
+                }
+                
+                // Detect if stuck (scroll position not changing)
+                if (Math.abs(currentScroll - lastScrollY) < 1) {
+                  stuckCount++;
+                  if (stuckCount > 10) {
+                    // Stuck for too long, stop
+                    clearInterval(scrollInterval);
+                    return;
+                  }
+                } else {
+                  stuckCount = 0;
+                }
+                lastScrollY = currentScroll;
+                
+                // Force instant scroll
+                window.scrollTo({ top: currentScroll + pixelsPerStep, behavior: 'instant' });
+              }, intervalMs);
+            }, 300);
+          }
+        });
+
+        showStatus('Recording tab... scrolling automatically', 'info');
+
+      } catch (err) {
+        console.error('Tab capture error:', err);
+        showStatus('Capture failed: ' + err.message, 'error');
+        isRecording = false;
+        recordBtn.textContent = '🎬 Auto Scroll Video';
+        if (captureStream) {
+          captureStream.getTracks().forEach(track => track.stop());
+        }
+      }
+    };
+  }
+
+  function showStatus(msg, type = 'info') {
+    statusEl.textContent = msg;
+    statusEl.className = 'status ' + type;
+    statusEl.style.display = 'block';
+    setTimeout(() => {
+      statusEl.style.display = 'none';
+    }, 3000);
+  }
 });
-
-

@@ -158,9 +158,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Only show mockup button for viewport screenshots (not fullpage)
     const showMockup = screenshot.captureType === 'viewport';
 
+    // Check if this is a video file
+    const isVideo = screenshot.captureType === 'video' || screenshot.filename?.endsWith('.webm');
+    
     card.innerHTML = `
       <input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''}>
-      <img class="card-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}">
+      ${isVideo ? `
+        <video class="card-image card-video" src="${screenshot.dataUrl}" muted loop></video>
+      ` : `
+        <img class="card-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}">
+      `}
       <div class="card-info">
         <div class="card-filename">${screenshot.filename}</div>
         <div class="card-meta">
@@ -170,7 +177,8 @@ document.addEventListener('DOMContentLoaded', () => {
         <div class="card-date">${formatDate(screenshot.timestamp)}</div>
       </div>
       <div class="card-actions">
-        ${showMockup ? `<button class="btn btn-sm btn-secondary btn-mockup" title="Add Device Frame">📱 Mockup</button>` : ''}
+        ${showMockup && !isVideo ? `<button class="btn btn-sm btn-secondary btn-mockup" title="Add Device Frame">📱 Mockup</button>` : ''}
+        ${isVideo ? `<button class="btn btn-sm btn-primary btn-play" title="Play Video">▶️</button>` : ''}
         <button class="btn btn-sm btn-secondary btn-download" title="Download">
           📥
         </button>
@@ -192,6 +200,7 @@ document.addEventListener('DOMContentLoaded', () => {
       toggleSelect(screenshot.id, checkbox.checked);
     });
 
+    // Click handler - open preview for both images and videos
     image.addEventListener('click', () => {
       openPreview(screenshot);
     });
@@ -201,6 +210,22 @@ document.addEventListener('DOMContentLoaded', () => {
       mockupBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         openMockupModal(screenshot);
+      });
+    }
+
+    // Play video button
+    const playBtn = card.querySelector('.btn-play');
+    const videoEl = card.querySelector('.card-video');
+    if (playBtn && videoEl) {
+      playBtn.addEventListener('click', (e) => {
+        e.stopPropagation();
+        if (videoEl.paused) {
+          videoEl.play();
+          playBtn.textContent = '⏸️';
+        } else {
+          videoEl.pause();
+          playBtn.textContent = '▶️';
+        }
       });
     }
 
@@ -252,6 +277,8 @@ document.addEventListener('DOMContentLoaded', () => {
     exportPdfBtn.disabled = !hasSelection;
     // Enable showcase when 3+ screenshots selected
     showcaseBtn.disabled = selectedIds.size < 3;
+    // Enable custom canvas when any screenshots selected
+    if (customCanvasBtn) customCanvasBtn.disabled = !hasSelection;
 
     selectAllCheckbox.checked = selectedIds.size === screenshots.length && screenshots.length > 0;
   }
@@ -441,6 +468,269 @@ document.addEventListener('DOMContentLoaded', () => {
     link.href = canvas.toDataURL('image/png');
     link.download = `mockup_${deviceId}_${screenshot.filename}`;
     link.click();
+  }
+
+  // Custom Canvas Modal - Free-form screenshot placement
+  function openCustomCanvasModal() {
+    const selected = screenshots.filter(s => selectedIds.has(s.id));
+    if (selected.length === 0) return;
+
+    const backgrounds = [
+      { id: 'dark', name: 'Dark', colors: ['#1a1a2e', '#16213e'] },
+      { id: 'purple', name: 'Purple', colors: ['#667eea', '#764ba2'] },
+      { id: 'teal', name: 'Teal', colors: ['#0d9488', '#14b8a6'] },
+      { id: 'orange', name: 'Sunset', colors: ['#f093fb', '#f5576c'] },
+      { id: 'light', name: 'Light', colors: ['#f8fafc', '#e2e8f0'] },
+      { id: 'transparent', name: 'None', colors: ['transparent'] }
+    ];
+
+    let selectedBg = backgrounds[0];
+    let canvasWidth = 1920;
+    let canvasHeight = 1080;
+    
+    // Items on canvas with position/size
+    let canvasItems = selected.map((s, i) => ({
+      id: s.id,
+      dataUrl: s.dataUrl,
+      x: 100 + (i % 3) * 300,
+      y: 100 + Math.floor(i / 3) * 250,
+      width: 280,
+      height: 180,
+      selected: false
+    }));
+
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.innerHTML = `
+      <div class="showcase-modal canvas-modal" style="max-width: 95vw; width: 1200px;">
+        <div class="showcase-header">
+          <h2>🎨 Custom Canvas</h2>
+          <button class="modal-close">✕</button>
+        </div>
+        <div class="showcase-body" style="padding: 16px; display: flex; gap: 16px;">
+          <!-- Canvas Area -->
+          <div class="canvas-editor-area" style="flex: 1;">
+            <div class="canvas-wrapper" id="canvas-wrapper" style="background: #222; border-radius: 8px; overflow: auto; max-height: 60vh;">
+              <div class="canvas-container" id="canvas-container" style="position: relative; margin: auto;"></div>
+            </div>
+          </div>
+          
+          <!-- Sidebar -->
+          <div class="canvas-sidebar" style="width: 200px; display: flex; flex-direction: column; gap: 16px;">
+            <!-- Canvas Size -->
+            <div class="sidebar-section">
+              <h4>Canvas Size</h4>
+              <div style="display: flex; gap: 8px;">
+                <input type="number" id="canvas-width" value="${canvasWidth}" style="width: 70px;" class="input-sm">
+                <span style="color: #888;">×</span>
+                <input type="number" id="canvas-height" value="${canvasHeight}" style="width: 70px;" class="input-sm">
+              </div>
+              <div style="display: flex; gap: 4px; margin-top: 8px; flex-wrap: wrap;">
+                <button class="size-preset" data-w="1920" data-h="1080">1080p</button>
+                <button class="size-preset" data-w="1280" data-h="720">720p</button>
+                <button class="size-preset" data-w="1200" data-h="630">Social</button>
+              </div>
+            </div>
+            
+            <!-- Background -->
+            <div class="sidebar-section">
+              <h4>Background</h4>
+              <div class="bg-grid-compact">
+                ${backgrounds.map((bg, i) => `
+                  <div class="bg-chip ${i === 0 ? 'selected' : ''}" data-bg="${bg.id}" 
+                    style="background: ${bg.id === 'transparent' ? 'repeating-conic-gradient(#ccc 0% 25%, #fff 0% 50%) 50% / 16px 16px' : `linear-gradient(135deg, ${bg.colors.join(', ')})`}" 
+                    title="${bg.name}"></div>
+                `).join('')}
+                <input type="color" id="custom-canvas-color" value="#667eea" class="bg-chip-custom" title="Custom">
+              </div>
+            </div>
+            
+            <!-- Instructions -->
+            <div class="sidebar-section" style="font-size: 0.75rem; color: #888;">
+              <p>• Drag screenshots to position</p>
+              <p>• Drag corners to resize</p>
+              <p>• Click to select</p>
+            </div>
+          </div>
+        </div>
+        <div class="showcase-footer">
+          <button class="btn btn-secondary" id="btn-canvas-cancel">Cancel</button>
+          <button class="btn btn-primary" id="btn-canvas-download">📥 Download</button>
+        </div>
+      </div>
+    `;
+
+    const container = overlay.querySelector('#canvas-container');
+    const canvasWidthInput = overlay.querySelector('#canvas-width');
+    const canvasHeightInput = overlay.querySelector('#canvas-height');
+    const bgChips = overlay.querySelectorAll('.bg-chip');
+    const customColorInput = overlay.querySelector('#custom-canvas-color');
+    const sizePresets = overlay.querySelectorAll('.size-preset');
+    const closeBtn = overlay.querySelector('.modal-close');
+    const cancelBtn = overlay.querySelector('#btn-canvas-cancel');
+    const downloadBtn = overlay.querySelector('#btn-canvas-download');
+
+    // Render canvas items
+    function renderCanvas() {
+      container.style.width = canvasWidth + 'px';
+      container.style.height = canvasHeight + 'px';
+      
+      // Background
+      if (selectedBg.colors[0] === 'transparent') {
+        container.style.background = 'repeating-conic-gradient(#ddd 0% 25%, #fff 0% 50%) 50% / 20px 20px';
+      } else {
+        container.style.background = `linear-gradient(135deg, ${selectedBg.colors.join(', ')})`;
+      }
+      
+      container.innerHTML = '';
+      
+      canvasItems.forEach((item, idx) => {
+        const div = document.createElement('div');
+        div.className = 'canvas-item' + (item.selected ? ' selected' : '');
+        div.style.cssText = `
+          position: absolute;
+          left: ${item.x}px;
+          top: ${item.y}px;
+          width: ${item.width}px;
+          height: ${item.height}px;
+          cursor: move;
+          box-shadow: 0 4px 20px rgba(0,0,0,0.3);
+          border-radius: 4px;
+          overflow: hidden;
+          ${item.selected ? 'outline: 2px solid #667eea;' : ''}
+        `;
+        div.innerHTML = `
+          <img src="${item.dataUrl}" style="width: 100%; height: 100%; object-fit: cover; pointer-events: none;">
+          <div class="resize-handle" style="position: absolute; right: 0; bottom: 0; width: 16px; height: 16px; background: #667eea; cursor: se-resize; border-radius: 2px 0 4px 0;"></div>
+        `;
+        
+        // Drag to move
+        let isDragging = false, isResizing = false;
+        let startX, startY, startItemX, startItemY, startW, startH;
+        
+        div.addEventListener('mousedown', (e) => {
+          if (e.target.classList.contains('resize-handle')) {
+            isResizing = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startW = item.width;
+            startH = item.height;
+          } else {
+            isDragging = true;
+            startX = e.clientX;
+            startY = e.clientY;
+            startItemX = item.x;
+            startItemY = item.y;
+          }
+          
+          canvasItems.forEach(i => i.selected = false);
+          item.selected = true;
+          renderCanvas();
+          e.preventDefault();
+        });
+        
+        document.addEventListener('mousemove', (e) => {
+          if (isDragging) {
+            item.x = startItemX + (e.clientX - startX);
+            item.y = startItemY + (e.clientY - startY);
+            div.style.left = item.x + 'px';
+            div.style.top = item.y + 'px';
+          }
+          if (isResizing) {
+            item.width = Math.max(50, startW + (e.clientX - startX));
+            item.height = Math.max(50, startH + (e.clientY - startY));
+            div.style.width = item.width + 'px';
+            div.style.height = item.height + 'px';
+          }
+        });
+        
+        document.addEventListener('mouseup', () => {
+          isDragging = false;
+          isResizing = false;
+        });
+        
+        container.appendChild(div);
+      });
+    }
+
+    // Event listeners
+    closeBtn.addEventListener('click', () => overlay.remove());
+    cancelBtn.addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    canvasWidthInput.addEventListener('change', () => {
+      canvasWidth = parseInt(canvasWidthInput.value) || 1920;
+      renderCanvas();
+    });
+    
+    canvasHeightInput.addEventListener('change', () => {
+      canvasHeight = parseInt(canvasHeightInput.value) || 1080;
+      renderCanvas();
+    });
+
+    sizePresets.forEach(btn => {
+      btn.addEventListener('click', () => {
+        canvasWidth = parseInt(btn.dataset.w);
+        canvasHeight = parseInt(btn.dataset.h);
+        canvasWidthInput.value = canvasWidth;
+        canvasHeightInput.value = canvasHeight;
+        renderCanvas();
+      });
+    });
+
+    bgChips.forEach(chip => {
+      chip.addEventListener('click', () => {
+        bgChips.forEach(c => c.classList.remove('selected'));
+        chip.classList.add('selected');
+        selectedBg = backgrounds.find(b => b.id === chip.dataset.bg);
+        renderCanvas();
+      });
+    });
+
+    customColorInput.addEventListener('input', (e) => {
+      selectedBg = { id: 'custom', colors: [e.target.value, e.target.value] };
+      bgChips.forEach(c => c.classList.remove('selected'));
+      renderCanvas();
+    });
+
+    downloadBtn.addEventListener('click', async () => {
+      downloadBtn.textContent = '⏳ Generating...';
+      downloadBtn.disabled = true;
+
+      const canvas = document.createElement('canvas');
+      canvas.width = canvasWidth;
+      canvas.height = canvasHeight;
+      const ctx = canvas.getContext('2d');
+
+      // Draw background
+      if (selectedBg.colors[0] !== 'transparent') {
+        const gradient = ctx.createLinearGradient(0, 0, canvasWidth, canvasHeight);
+        gradient.addColorStop(0, selectedBg.colors[0]);
+        gradient.addColorStop(1, selectedBg.colors[1] || selectedBg.colors[0]);
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, canvasWidth, canvasHeight);
+      }
+
+      // Draw items
+      for (const item of canvasItems) {
+        const img = new Image();
+        await new Promise((resolve) => {
+          img.onload = resolve;
+          img.src = item.dataUrl;
+        });
+        ctx.drawImage(img, item.x, item.y, item.width, item.height);
+      }
+
+      const link = document.createElement('a');
+      link.href = canvas.toDataURL('image/png');
+      link.download = `custom_canvas_${Date.now()}.png`;
+      link.click();
+
+      overlay.remove();
+    });
+
+    renderCanvas();
+    document.body.appendChild(overlay);
   }
 
   // Batch Website Screenshot Capture Modal
@@ -866,15 +1156,15 @@ document.addEventListener('DOMContentLoaded', () => {
     
     // Canvas size based on device type - realistic aspect ratios
     const sizes = {
-      // Phones (2:3 aspect ratio - more realistic)
-      'iphone-15-pro': { w: 500, h: 700 },
-      'iphone-15': { w: 500, h: 700 },
-      'iphone-14-pro': { w: 500, h: 700 },
-      'iphone-14': { w: 500, h: 700 },
-      'pixel-8': { w: 480, h: 680 },
-      'pixel-7': { w: 480, h: 680 },
-      'samsung-s24': { w: 480, h: 680 },
-      'samsung-s23': { w: 480, h: 680 },
+      // Phones (compact mockup - not too tall)
+       'iphone-15-pro': { w: 375, h: 610 },
+'iphone-15': { w: 375, h: 667 },
+'iphone-14-pro': { w: 375, h: 667 },
+'iphone-14': { w: 375, h: 667 },
+'pixel-8': { w: 375, h: 667 },
+'pixel-7': { w: 375, h: 667 },
+'samsung-s24': { w: 375, h: 667 },
+'samsung-s23': { w: 375, h: 667 },
       // Tablets (4:3 / 3:4 aspect ratio)
       'ipad-pro-12': { w: 900, h: 1200 },
       'ipad-pro-11': { w: 850, h: 1100 },
@@ -1160,163 +1450,1042 @@ document.addEventListener('DOMContentLoaded', () => {
     ctx.restore();
   }
 
-  // Create 3-device showcase (Desktop, Tablet, Mobile)
+  // Create Showcase Modal with templates and device options
   async function createShowcase() {
     const selectedScreenshots = screenshots.filter(s => selectedIds.has(s.id));
     
-    if (selectedScreenshots.length < 3) {
-      alert('Please select at least 3 screenshots (desktop, tablet, mobile)');
+    if (selectedScreenshots.length < 2) {
+      alert('Please select at least 2 screenshots');
       return;
     }
+
+    // Open showcase modal
+    const templates = ['3-Device', 'Side by Side', 'Stacked', 'Hero + Features', 'Comparison', 'Fullpage', 'Fullpage Split', 'Fullpage Grid', 'Trio', 'Custom'];
+    let currentTemplate = '3-Device';
+    let bgGradient = ['#1a1a2e', '#0f3460'];
+    let zoomLevel = 1;
+    let slotOrder = [0, 1, 2]; // For reordering screenshots
     
-    // Sort by width to determine device type (largest = desktop, medium = tablet, smallest = mobile)
+    // Text overlay configuration
+    let textOverlay = {
+      enabled: false,
+      text: '',
+      font: 'Inter',
+      size: 48,
+      color: '#ffffff',
+      position: 'bottom', // top, center, bottom
+      shadow: true
+    };
+    
+    // Collapsible sections state
+    const collapsedSections = {};
+    
+    // Background presets (gradients + solids)
+    const BACKGROUNDS = [
+      { id: 'dark', name: 'Dark', colors: ['#1a1a2e', '#0f3460'], type: 'gradient' },
+      { id: 'midnight', name: 'Midnight', colors: ['#0f0c29', '#302b63', '#24243e'], type: 'gradient' },
+      { id: 'ocean', name: 'Ocean', colors: ['#2E3192', '#1BFFFF'], type: 'gradient' },
+      { id: 'sunset', name: 'Sunset', colors: ['#fc4a1a', '#f7b733'], type: 'gradient' },
+      { id: 'forest', name: 'Forest', colors: ['#11998e', '#38ef7d'], type: 'gradient' },
+      { id: 'purple', name: 'Purple', colors: ['#667eea', '#764ba2'], type: 'gradient' },
+      { id: 'pink', name: 'Pink', colors: ['#FF3CAC', '#784BA0', '#2B86C5'], type: 'gradient' },
+      { id: 'fire', name: 'Fire', colors: ['#f12711', '#f5af19'], type: 'gradient' },
+      { id: 'cosmic', name: 'Cosmic', colors: ['#000428', '#004e92'], type: 'gradient' },
+      { id: 'lime', name: 'Lime', colors: ['#a8e063', '#56ab2f'], type: 'gradient' },
+      { id: 'light', name: 'Light', colors: ['#f8f9fa', '#e9ecef'], type: 'gradient' },
+      { id: 'white', name: 'White', colors: ['#ffffff', '#ffffff'], type: 'solid' },
+      { id: 'black', name: 'Black', colors: ['#0a0a0a', '#0a0a0a'], type: 'solid' },
+      { id: 'gray', name: 'Gray', colors: ['#2d2d2d', '#2d2d2d'], type: 'solid' }
+    ];
+    
     const sorted = [...selectedScreenshots].sort((a, b) => {
       const widthA = parseInt(a.filename.match(/(\d+)x/)?.[1] || 1920);
       const widthB = parseInt(b.filename.match(/(\d+)x/)?.[1] || 1920);
       return widthB - widthA;
     }).slice(0, 3);
     
-    const [desktop, tablet, mobile] = sorted;
+    // Universal device options - same as mockup modal for consistency
+    const SHOWCASE_DEVICES = {
+      desktop: [
+        { id: 'none', name: 'No Mockup', icon: '🖼️' },
+        { id: 'macbook-pro-16', name: 'MacBook Pro 16"', icon: '💻' },
+        { id: 'macbook-pro-14', name: 'MacBook Pro 14"', icon: '💻' },
+        { id: 'macbook-air', name: 'MacBook Air', icon: '💻' },
+        { id: 'laptop-generic', name: 'Laptop', icon: '💻' },
+        { id: 'dell-xps', name: 'Dell XPS', icon: '💻' },
+        { id: 'imac-24', name: 'iMac 24"', icon: '🖥️' },
+        { id: 'studio-display', name: 'Studio Display', icon: '🖥️' },
+        { id: 'browser-chrome', name: 'Chrome Browser', icon: '🌐' },
+        { id: 'browser-safari', name: 'Safari Browser', icon: '🌐' },
+        { id: 'browser-arc', name: 'Arc Browser', icon: '🌐' }
+      ],
+      tablet: [
+        { id: 'none', name: 'No Mockup', icon: '🖼️' },
+        { id: 'ipad-pro-12', name: 'iPad Pro 12.9"', icon: '📲' },
+        { id: 'ipad-pro-11', name: 'iPad Pro 11"', icon: '📲' },
+        { id: 'ipad-air', name: 'iPad Air', icon: '📲' },
+        { id: 'ipad-mini', name: 'iPad Mini', icon: '📲' },
+        { id: 'galaxy-tab-s9', name: 'Galaxy Tab S9', icon: '📲' },
+        { id: 'surface-pro', name: 'Surface Pro', icon: '📲' }
+      ],
+      phone: [
+        { id: 'none', name: 'No Mockup', icon: '🖼️' },
+        { id: 'iphone-15-pro', name: 'iPhone 15 Pro', icon: '📱' },
+        { id: 'iphone-15', name: 'iPhone 15', icon: '📱' },
+        { id: 'iphone-14-pro', name: 'iPhone 14 Pro', icon: '📱' },
+        { id: 'pixel-8', name: 'Google Pixel 8', icon: '📱' },
+        { id: 'pixel-7', name: 'Google Pixel 7', icon: '📱' },
+        { id: 'samsung-s24', name: 'Samsung Galaxy S24', icon: '📱' },
+        { id: 'samsung-s23', name: 'Samsung Galaxy S23', icon: '📱' }
+      ]
+    };
     
-    // Canvas dimensions for showcase (wide format)
-    const canvas = document.createElement('canvas');
+    // Slot configurations with selected device IDs
+    let slotConfig = [
+      { deviceId: 'macbook-pro-16', category: 'desktop' },  // Slot 1 (Desktop)
+      { deviceId: 'ipad-pro-12', category: 'tablet' },       // Slot 2 (Tablet)
+      { deviceId: 'iphone-15-pro', category: 'phone' }       // Slot 3 (Phone)
+    ];
+
+    // Modal HTML - Modern Minimal Design
+    const overlay = document.createElement('div');
+    overlay.className = 'modal-overlay show';
+    overlay.style.zIndex = '99999';
+    overlay.innerHTML = `
+      <div class="showcase-modal" style="width:98vw;height:95vh;background:#0a0a0f;display:grid;grid-template-columns:220px 1fr 200px;grid-template-rows:auto 1fr auto;border-radius:16px;overflow:hidden;box-shadow:0 25px 80px rgba(0,0,0,0.8);">
+        
+        <!-- Header -->
+        <div style="grid-column:1/-1;display:flex;align-items:center;justify-content:space-between;padding:16px 24px;background:rgba(255,255,255,0.02);border-bottom:1px solid rgba(255,255,255,0.06);">
+          <h2 style="margin:0;font-size:1.1rem;color:rgba(255,255,255,0.9);font-weight:600;">Create Showcase</h2>
+          <div style="display:flex;align-items:center;gap:12px;">
+            <a href="https://github.com/Hamzaisadev/DevShot" target="_blank" style="padding:10px 16px;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.15);border-radius:10px;color:rgba(255,255,255,0.9);font-size:0.85rem;font-weight:500;cursor:pointer;text-decoration:none;display:flex;align-items:center;gap:6px;transition:all 0.2s;">
+              ⭐ Star on GitHub
+            </a>
+            <button id="download-showcase" style="padding:12px 28px;background:linear-gradient(135deg, #22c55e, #16a34a);border:none;border-radius:10px;color:white;font-size:0.95rem;font-weight:600;cursor:pointer;box-shadow:0 4px 15px rgba(34,197,94,0.3);">
+              ⬇ Download PNG
+            </button>
+            <button id="close-showcase" style="width:40px;height:40px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:10px;color:rgba(255,255,255,0.6);font-size:1.2rem;cursor:pointer;display:flex;align-items:center;justify-content:center;">
+              ✕
+            </button>
+          </div>
+        </div>
+        
+        <!-- Left Sidebar - Templates -->
+        <div style="background:rgba(255,255,255,0.02);border-right:1px solid rgba(255,255,255,0.06);padding:20px;overflow-y:auto;">
+          <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);font-weight:600;letter-spacing:1px;margin-bottom:12px;">TEMPLATES</div>
+          <div style="display:flex;flex-direction:column;gap:8px;">
+            ${templates.map((t, i) => `
+              <button class="tpl-chip ${i === 0 ? 'active' : ''}" data-tpl="${t}" 
+                style="padding:12px 16px;text-align:left;background:${i === 0 ? 'rgba(99,102,241,0.15)' : 'rgba(255,255,255,0.03)'};border:1px solid ${i === 0 ? 'rgba(99,102,241,0.4)' : 'rgba(255,255,255,0.06)'};border-radius:8px;color:${i === 0 ? '#a5b4fc' : 'rgba(255,255,255,0.7)'};font-size:0.85rem;cursor:pointer;transition:all 0.2s;">
+                ${t}
+              </button>
+            `).join('')}
+          </div>
+        </div>
+        
+        <!-- Main Canvas Area -->
+        <div style="display:flex;align-items:center;justify-content:center;background:#080810;position:relative;overflow:hidden;">
+          <canvas id="showcase-canvas" style="max-width:90%;max-height:90%;border-radius:8px;box-shadow:0 20px 60px rgba(0,0,0,0.6);"></canvas>
+          <div id="custom-controls" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);background:rgba(0,0,0,0.9);backdrop-filter:blur(10px);padding:10px 20px;border-radius:12px;border:1px solid rgba(255,255,255,0.1);display:none;">
+            <span style="color:rgba(255,255,255,0.7);font-size:0.85rem;">Click items to select • Drag to move</span>
+          </div>
+        </div>
+        
+        <!-- Right Sidebar - Background -->
+        <div style="background:rgba(255,255,255,0.02);border-left:1px solid rgba(255,255,255,0.06);padding:20px;overflow-y:auto;">
+          <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);font-weight:600;letter-spacing:1px;margin-bottom:12px;">BACKGROUND</div>
+          <div style="display:grid;grid-template-columns:repeat(3, 1fr);gap:8px;margin-bottom:16px;">
+            ${BACKGROUNDS.map((bg, i) => `
+              <button class="bg-dot ${i === 0 ? 'active' : ''}" data-bg="${bg.id}" 
+                style="aspect-ratio:1;border-radius:8px;background:${bg.colors.length > 1 ? `linear-gradient(135deg, ${bg.colors.join(', ')})` : bg.colors[0]};border:2px solid ${i === 0 ? '#fff' : 'transparent'};cursor:pointer;transition:all 0.15s;"
+                title="${bg.name}"></button>
+            `).join('')}
+          </div>
+          <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);font-weight:600;letter-spacing:1px;margin-bottom:8px;">CUSTOM</div>
+          <input type="color" id="custom-bg-color" value="#667eea" style="width:100%;height:36px;border:none;border-radius:8px;cursor:pointer;">
+        </div>
+        
+        <!-- Bottom Panel - Slot Assignments -->
+        <div style="grid-column:1/-1;background:rgba(255,255,255,0.02);border-top:1px solid rgba(255,255,255,0.06);padding:20px 24px;">
+          <div style="display:flex;gap:20px;">
+            ${[
+              { slot: 0, label: 'Desktop', icon: '💻', category: 'desktop' },
+              { slot: 1, label: 'Tablet', icon: '📲', category: 'tablet' },
+              { slot: 2, label: 'Phone', icon: '📱', category: 'phone' }
+            ].map(({ slot, label, icon, category }) => `
+              <div class="slot-card" style="flex:1;background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.08);border-radius:12px;padding:16px;">
+                <!-- Header -->
+                <div style="font-size:0.8rem;color:rgba(255,255,255,0.9);font-weight:600;margin-bottom:12px;">${icon} ${label}</div>
+                
+                <!-- Large Thumbnail -->
+                <div class="slot-thumb" data-slot="${slot}" style="width:100%;height:80px;background:rgba(0,0,0,0.4);border-radius:8px;overflow:hidden;border:1px solid rgba(255,255,255,0.1);margin-bottom:12px;">
+                  ${sorted[slot] ? `<img src="${sorted[slot].dataUrl}" style="width:100%;height:100%;object-fit:cover;">` : '<div style="width:100%;height:100%;display:flex;align-items:center;justify-content:center;color:rgba(255,255,255,0.2);font-size:0.75rem;">No image</div>'}
+                </div>
+                
+                <!-- Screenshot Dropdown -->
+                <div style="margin-bottom:8px;">
+                  <label style="font-size:0.65rem;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px;">Screenshot</label>
+                  <select class="screenshot-select" data-slot="${slot}" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:rgba(255,255,255,0.9);font-size:0.8rem;cursor:pointer;">
+                    ${selectedScreenshots.map((s, idx) => {
+                      // Parse device type and capture type from filename
+                      const fn = s.filename || '';
+                      let deviceType = 'Unknown';
+                      let captureType = 'Viewport';
+                      if (fn.includes('1920x') || fn.includes('desktop')) deviceType = 'Desktop';
+                      else if (fn.includes('768x') || fn.includes('tablet')) deviceType = 'Tablet';
+                      else if (fn.includes('375x') || fn.includes('390x') || fn.includes('mobile')) deviceType = 'Mobile';
+                      if (fn.includes('fullpage')) captureType = 'Fullpage';
+                      const label = `${deviceType} - ${captureType} - ${s.domain || 'Screenshot'}`;
+                      return `<option value="${idx}" ${idx === slot ? 'selected' : ''}>${label}</option>`;
+                    }).join('')}
+                  </select>
+                </div>
+                
+                <!-- Device Dropdown -->
+                <div>
+                  <label style="font-size:0.65rem;color:rgba(255,255,255,0.4);display:block;margin-bottom:4px;">Device Frame</label>
+                  <select class="device-select" data-slot="${slot}" data-category="${category}" style="width:100%;padding:8px 10px;background:rgba(0,0,0,0.3);border:1px solid rgba(255,255,255,0.1);border-radius:6px;color:rgba(255,255,255,0.9);font-size:0.8rem;cursor:pointer;">
+                    ${SHOWCASE_DEVICES[category].map((d, idx) => `
+                      <option value="${d.id}" ${idx === 0 ? 'selected' : ''}>${d.icon} ${d.name}</option>
+                    `).join('')}
+                  </select>
+                </div>
+              </div>
+            `).join('')}
+          </div>
+        </div>
+        
+        <!-- Device Picker Popup -->
+        <div id="device-picker" style="display:none;position:fixed;background:rgba(10,10,15,0.98);backdrop-filter:blur(20px);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:16px;box-shadow:0 20px 50px rgba(0,0,0,0.6);z-index:10000;max-width:300px;">
+          <div style="font-size:0.7rem;color:rgba(255,255,255,0.4);margin-bottom:10px;font-weight:600;">SELECT DEVICE</div>
+          <div id="device-picker-grid" style="display:grid;grid-template-columns:1fr 1fr;gap:6px;"></div>
+        </div>
+      </div>
+    `;
+
+    // Canvas Setup
+    const canvas = overlay.querySelector('#showcase-canvas');
+    const ctx = canvas.getContext('2d');
     canvas.width = 1920;
     canvas.height = 1080;
-    const ctx = canvas.getContext('2d');
+
+    // State for Custom Mode
+    let items = [];
+    let isDragging = false;
+    let dragItem = null;
+    let dragOffset = { x: 0, y: 0 };
+    let selectedItemIndex = -1;
     
-    // Draw gradient background
-    const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
-    gradient.addColorStop(0, '#1a1a2e');
-    gradient.addColorStop(0.5, '#16213e');
-    gradient.addColorStop(1, '#0f3460');
-    ctx.fillStyle = gradient;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    // All devices flat list for custom mode
+    const allDevices = [
+      ...SHOWCASE_DEVICES.desktop,
+      ...SHOWCASE_DEVICES.tablet,
+      ...SHOWCASE_DEVICES.phone
+    ];
     
-    // Add subtle grid pattern
-    ctx.strokeStyle = 'rgba(255,255,255,0.02)';
-    ctx.lineWidth = 1;
-    for (let x = 0; x < canvas.width; x += 40) {
-      ctx.beginPath();
-      ctx.moveTo(x, 0);
-      ctx.lineTo(x, canvas.height);
-      ctx.stroke();
+    // Update custom controls with device selector
+    function updateCustomDeviceSelector() {
+      const controlsEl = overlay.querySelector('#custom-controls');
+      if (!controlsEl) return;
+      
+      const selectedItem = items.find(item => item.selected);
+      
+      if (selectedItem) {
+        // Find device info
+        const device = allDevices.find(d => d.id === selectedItem.deviceId) || { icon: '💻', name: 'Device' };
+        
+        controlsEl.innerHTML = `
+          <div style="display:flex;align-items:center;gap:8px;">
+            <button id="custom-resize-down" style="width:28px;height:28px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white;cursor:pointer;font-size:0.9rem;" title="Smaller">−</button>
+            <button id="custom-resize-up" style="width:28px;height:28px;background:rgba(255,255,255,0.1);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white;cursor:pointer;font-size:0.9rem;" title="Bigger">+</button>
+            <select id="custom-device-select" style="padding:4px 8px;background:rgba(0,0,0,0.5);border:1px solid rgba(255,255,255,0.2);border-radius:6px;color:white;font-size:0.75rem;max-width:120px;">
+              ${allDevices.map(d => `<option value="${d.id}" ${d.id === selectedItem.deviceId ? 'selected' : ''}>${d.icon} ${d.name}</option>`).join('')}
+            </select>
+          </div>
+        `;
+        
+        // Device change handler
+        controlsEl.querySelector('#custom-device-select').onchange = (e) => {
+          selectedItem.deviceId = e.target.value;
+          render();
+        };
+        
+        // Resize handlers
+        controlsEl.querySelector('#custom-resize-up').onclick = () => {
+          selectedItem.w = Math.min(selectedItem.w + 50, 1200);
+          render();
+        };
+        controlsEl.querySelector('#custom-resize-down').onclick = () => {
+          selectedItem.w = Math.max(selectedItem.w - 50, 100);
+          render();
+        };
+      } else {
+        controlsEl.innerHTML = `<span style="color:rgba(255,255,255,0.5);font-size:0.8rem;">Click item to select</span>`;
+      }
     }
-    for (let y = 0; y < canvas.height; y += 40) {
-      ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(canvas.width, y);
-      ctx.stroke();
+
+    // Render Function
+    async function render() {
+      // Clear
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Background
+      const gradient = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
+      gradient.addColorStop(0, bgGradient[0]);
+      gradient.addColorStop(1, bgGradient[1]);
+      ctx.fillStyle = gradient;
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+      // Helper to load images
+      const loadImg = (url) => new Promise(r => { 
+        if(!url) return r(null);
+        const i = new Image(); 
+        i.onload = () => r(i); 
+        i.src = url; 
+      });
+
+      const imgs = await Promise.all(sorted.map(s => loadImg(s?.dataUrl)));
+
+      // --- TEMPLATE: 3-Device (Desktop + Tablet + Phone) ---
+      if (currentTemplate === '3-Device') {
+         // Desktop (Center Back)
+         if (imgs[0]) {
+           const deviceId = document.getElementById('slot-0')?.value || 'macbook-pro-16';
+           drawDevice(ctx, imgs[0], deviceId, 1920/2, 450, 1000); // x, y, width
+         }
+         // Tablet (Left Front)
+         if (imgs[1]) {
+           const deviceId = document.getElementById('slot-1')?.value || 'ipad-pro-12';
+           drawDevice(ctx, imgs[1], deviceId, 400, 600, 400);
+         }
+         // Phone (Right Front)
+         if (imgs[2]) {
+           const deviceId = document.getElementById('slot-2')?.value || 'iphone-15-pro';
+           drawDevice(ctx, imgs[2], deviceId, 1500, 620, 220); // Compact width 220
+         }
+      }
+      
+      // --- TEMPLATE: Side by Side ---
+      else if (currentTemplate === 'Side by Side') {
+         const deviceId = document.getElementById('slot-0')?.value || 'macbook-pro-16';
+         if(imgs[0]) drawDevice(ctx, imgs[0], deviceId, 500, 540, 800);
+         if(imgs[1]) drawDevice(ctx, imgs[1], deviceId, 1420, 540, 800);
+      }
+      
+      // --- TEMPLATE: Stacked (vertical centered) ---
+      else if (currentTemplate === 'Stacked') {
+         const deviceId = document.getElementById('slot-0')?.value || 'macbook-pro-16';
+         const count = Math.min(imgs.filter(Boolean).length, 3);
+         const spacing = 300;
+         const startY = 540 - ((count - 1) * spacing) / 2;
+         
+         imgs.slice(0, count).forEach((img, i) => {
+            if (img) {
+               const y = startY + (i * spacing);
+               const scale = 1 - (i * 0.15);
+               drawDevice(ctx, img, deviceId, 960, y, 900 * scale);
+            }
+         });
+      }
+      
+      // --- TEMPLATE: Hero + Features (large main + small secondary) ---
+      else if (currentTemplate === 'Hero + Features') {
+         // Large desktop on left, smaller tablet + phone stacked on right
+         const desktopId = document.querySelector('.device-select[data-slot="0"]')?.value || 'macbook-pro-16';
+         const tabletId = document.querySelector('.device-select[data-slot="1"]')?.value || 'ipad-pro-12';
+         const phoneId = document.querySelector('.device-select[data-slot="2"]')?.value || 'iphone-15-pro';
+         
+         // Main hero (desktop) - left side, large
+         if (imgs[0]) drawDevice(ctx, imgs[0], desktopId, 650, 520, 900);
+         
+         // Features (tablet + phone) - right side, smaller
+         if (imgs[1]) drawDevice(ctx, imgs[1], tabletId, 1450, 380, 400);
+         if (imgs[2]) drawDevice(ctx, imgs[2], phoneId, 1550, 700, 180);
+      }
+      
+      // --- TEMPLATE: Comparison (side by side, equal) ---
+      else if (currentTemplate === 'Comparison') {
+         // Two devices side by side, same size - good for before/after or version comparison
+         const leftId = document.querySelector('.device-select[data-slot="0"]')?.value || 'browser-chrome';
+         const rightId = document.querySelector('.device-select[data-slot="1"]')?.value || 'browser-chrome';
+         
+         if (imgs[0]) drawDevice(ctx, imgs[0], leftId, 530, 540, 700);
+         if (imgs[1]) drawDevice(ctx, imgs[1], rightId, 1390, 540, 700);
+      }
+      
+      // --- TEMPLATE: Fullpage (single large screenshot, no mockup) ---
+      else if (currentTemplate === 'Fullpage') {
+         // Large single image centered - perfect for full page screenshots
+         if (imgs[0]) drawDevice(ctx, imgs[0], 'none', 960, 540, 1400);
+      }
+      
+      // --- TEMPLATE: Fullpage Split (two full images side by side) ---
+      else if (currentTemplate === 'Fullpage Split') {
+         // Two images side by side without device frames
+         if (imgs[0]) drawDevice(ctx, imgs[0], 'none', 520, 540, 700);
+         if (imgs[1]) drawDevice(ctx, imgs[1], 'none', 1400, 540, 700);
+      }
+      
+      // --- TEMPLATE: Fullpage Grid (3 images in grid) ---
+      else if (currentTemplate === 'Fullpage Grid') {
+         // Top row (2 images), bottom row (1 centered)
+         if (imgs[0]) drawDevice(ctx, imgs[0], 'none', 520, 320, 620);
+         if (imgs[1]) drawDevice(ctx, imgs[1], 'none', 1400, 320, 620);
+         if (imgs[2]) drawDevice(ctx, imgs[2], 'none', 960, 760, 620);
+      }
+      
+      // --- TEMPLATE: Trio (3 overlapping images with depth) ---
+      else if (currentTemplate === 'Trio') {
+         // 3 images overlapping - great for showcasing 3 different websites
+         // Back (left)
+         ctx.globalAlpha = 0.9;
+         if (imgs[2]) drawDevice(ctx, imgs[2], 'none', 350, 520, 550);
+         // Middle (right)
+         ctx.globalAlpha = 0.95;
+         if (imgs[1]) drawDevice(ctx, imgs[1], 'none', 1570, 520, 550);
+         // Front (center)
+         ctx.globalAlpha = 1;
+         if (imgs[0]) drawDevice(ctx, imgs[0], 'none', 960, 540, 700);
+      }
+
+      // --- TEMPLATE: Custom ---
+      else if (currentTemplate === 'Custom') {
+         if (items.length === 0 && imgs.length > 0) {
+           // Init items with proper device IDs based on index
+           const defaultDevices = ['macbook-pro-16', 'ipad-pro-12', 'iphone-15-pro'];
+           items = imgs.map((img, i) => ({
+             img,
+             x: 300 + (i * 450),
+             y: 400 + (i * 80),
+             w: i === 2 ? 220 : (i === 1 ? 350 : 700), // Phone smaller, tablet medium, desktop large
+             deviceId: defaultDevices[i] || 'macbook-pro-16',
+             selected: false
+           }));
+           overlay.querySelector('#custom-controls').style.display = 'block';
+           updateCustomDeviceSelector();
+         }
+         
+         // Draw all items
+         items.forEach((item, idx) => {
+           drawDevice(ctx, item.img, item.deviceId, item.x, item.y, item.w);
+           
+           // Draw selection indicator if selected
+           if (item.selected) {
+             ctx.strokeStyle = '#6366f1';
+             ctx.lineWidth = 3;
+             ctx.setLineDash([8, 4]);
+             const h = item.deviceId.includes('phone') || item.deviceId.includes('iphone') || item.deviceId.includes('pixel') || item.deviceId.includes('samsung') 
+               ? item.w * 2.1 : item.w * 0.7;
+             ctx.strokeRect(item.x - item.w/2 - 10, item.y - h/2 - 10, item.w + 20, h + 20);
+             ctx.setLineDash([]);
+           }
+         });
+      }
+      
+      // --- TEXT OVERLAY ---
+      if (textOverlay.enabled && textOverlay.text) {
+        ctx.save();
+        ctx.font = `bold ${textOverlay.size}px ${textOverlay.font}`;
+        ctx.fillStyle = textOverlay.color;
+        ctx.textAlign = 'center';
+        
+        // Position
+        let textY;
+        if (textOverlay.position === 'top') {
+          textY = 80;
+          ctx.textBaseline = 'top';
+        } else if (textOverlay.position === 'center') {
+          textY = canvas.height / 2;
+          ctx.textBaseline = 'middle';
+        } else {
+          textY = canvas.height - 50;
+          ctx.textBaseline = 'bottom';
+        }
+        
+        // Shadow
+        if (textOverlay.shadow) {
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 10;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+        }
+        
+        ctx.fillText(textOverlay.text, canvas.width / 2, textY);
+        ctx.restore();
+      }
     }
-    
-    // Load images
-    const loadImage = (dataUrl) => new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.src = dataUrl;
+
+    // Generic Device Drawer - supports all SHOWCASE_DEVICES IDs
+    function drawDevice(ctx, img, deviceId, cx, cy, width) {
+       let h, screenW, screenH;
+       
+       // === NO MOCKUP (just the image) ===
+       if (deviceId === 'none') {
+          // Calculate height based on image aspect ratio
+          const aspectRatio = img.height / img.width;
+          h = width * aspectRatio;
+          
+          // Shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.3)';
+          ctx.shadowBlur = 25;
+          ctx.shadowOffsetY = 10;
+          
+          // Draw image with rounded corners
+          ctx.save();
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 12);
+          ctx.clip();
+          ctx.drawImage(img, cx - width/2, cy - h/2, width, h);
+          ctx.restore();
+          ctx.shadowColor = 'transparent';
+          return;
+       }
+       
+       // === MACBOOK / LAPTOPS ===
+       if (deviceId.includes('macbook') || deviceId.includes('laptop') || deviceId.includes('dell') || deviceId.includes('xps')) {
+          h = width * 0.65;
+          const baseHeight = 14;
+          
+          // Shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.3)';
+          ctx.shadowBlur = 20;
+          ctx.shadowOffsetY = 10;
+          
+          // Screen bezel (Space Gray)
+          ctx.fillStyle = deviceId.includes('dell') || deviceId.includes('laptop-generic') ? '#2c2c2c' : '#1c1c1e';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 10);
+          ctx.fill();
+          ctx.shadowColor = 'transparent';
+          
+          // Screen
+          screenW = width * 0.92;
+          screenH = h * 0.85;
+          ctx.save();
+          ctx.beginPath();
+          roundRect(ctx, cx - screenW/2, cy - h/2 + 8, screenW, screenH, 4);
+          ctx.clip();
+          ctx.drawImage(img, cx - screenW/2, cy - h/2 + 8, screenW, screenH);
+          ctx.restore();
+          
+          // Camera notch (MacBook style)
+          if (deviceId.includes('macbook')) {
+            const notchW = 60;
+            ctx.fillStyle = '#0a0a0a';
+            ctx.beginPath();
+            roundRect(ctx, cx - notchW/2, cy - h/2 + 2, notchW, 12, 6);
+            ctx.fill();
+            ctx.fillStyle = '#2a2a2e';
+            ctx.beginPath();
+            ctx.arc(cx, cy - h/2 + 8, 3, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          
+          // Keyboard base (trapezoid)
+          const baseY = cy + h/2;
+          ctx.fillStyle = deviceId.includes('dell') ? '#3a3a3a' : '#2c2c2e';
+          ctx.beginPath();
+          ctx.moveTo(cx - width/2 + 5, baseY);
+          ctx.lineTo(cx + width/2 - 5, baseY);
+          ctx.lineTo(cx + width/2 + 15, baseY + baseHeight);
+          ctx.lineTo(cx - width/2 - 15, baseY + baseHeight);
+          ctx.closePath();
+          ctx.fill();
+       }
+       
+       // === IMAC / MONITORS ===
+       else if (deviceId.includes('imac') || deviceId.includes('studio') || deviceId.includes('monitor')) {
+          h = width * 0.6;
+          const standHeight = h * 0.25;
+          
+          // Shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.3)';
+          ctx.shadowBlur = 25;
+          ctx.shadowOffsetY = 15;
+          
+          // Monitor bezel (Silver for iMac)
+          ctx.fillStyle = deviceId.includes('imac') ? '#e4e4e4' : '#1c1c1e';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 16);
+          ctx.fill();
+          ctx.shadowColor = 'transparent';
+          
+          // Inner bezel
+          ctx.fillStyle = '#0a0a0a';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2 + 12, cy - h/2 + 12, width - 24, h - 40, 8);
+          ctx.fill();
+          
+          // Screen
+          screenW = width - 28;
+          screenH = h - 48;
+          ctx.save();
+          ctx.beginPath();
+          roundRect(ctx, cx - screenW/2, cy - h/2 + 14, screenW, screenH, 4);
+          ctx.clip();
+          ctx.drawImage(img, cx - screenW/2, cy - h/2 + 14, screenW, screenH);
+          ctx.restore();
+          
+          // Stand neck
+          const neckW = width * 0.08;
+          ctx.fillStyle = deviceId.includes('imac') ? '#d0d0d0' : '#333';
+          ctx.fillRect(cx - neckW/2, cy + h/2, neckW, standHeight * 0.6);
+          
+          // Stand base
+          const baseW = width * 0.3;
+          ctx.fillStyle = deviceId.includes('imac') ? '#d0d0d0' : '#333';
+          ctx.beginPath();
+          ctx.ellipse(cx, cy + h/2 + standHeight * 0.7, baseW/2, 8, 0, 0, Math.PI * 2);
+          ctx.fill();
+       }
+       
+       // === BROWSER WINDOWS ===
+       else if (deviceId.includes('browser') || deviceId.includes('chrome') || deviceId.includes('safari') || deviceId.includes('arc')) {
+          h = width * 0.625;
+          const toolbarH = 32;
+          const isDark = deviceId.includes('arc') || deviceId.includes('chrome');
+          
+          // Shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.25)';
+          ctx.shadowBlur = 20;
+          ctx.shadowOffsetY = 8;
+          
+          // Window frame
+          ctx.fillStyle = isDark ? '#202124' : '#f5f5f5';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 10);
+          ctx.fill();
+          ctx.shadowColor = 'transparent';
+          
+          // Toolbar
+          ctx.fillStyle = isDark ? '#35363a' : '#e8e8e8';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, toolbarH, [10, 10, 0, 0]);
+          ctx.fill();
+          
+          // Traffic lights
+          const dotY = cy - h/2 + toolbarH/2;
+          const dotX = cx - width/2 + 16;
+          ctx.fillStyle = '#ff5f57';
+          ctx.beginPath(); ctx.arc(dotX, dotY, 5, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#febc2e';
+          ctx.beginPath(); ctx.arc(dotX + 16, dotY, 5, 0, Math.PI*2); ctx.fill();
+          ctx.fillStyle = '#28c840';
+          ctx.beginPath(); ctx.arc(dotX + 32, dotY, 5, 0, Math.PI*2); ctx.fill();
+          
+          // URL bar
+          ctx.fillStyle = isDark ? '#292a2d' : '#fff';
+          ctx.beginPath();
+          roundRect(ctx, dotX + 50, cy - h/2 + 8, width - 100, 16, 8);
+          ctx.fill();
+          
+          // Content
+          screenW = width - 4;
+          screenH = h - toolbarH - 4;
+          ctx.save();
+          ctx.beginPath();
+          roundRect(ctx, cx - screenW/2 + 2, cy - h/2 + toolbarH + 2, screenW - 4, screenH, [0, 0, 8, 8]);
+          ctx.clip();
+          ctx.drawImage(img, cx - screenW/2 + 2, cy - h/2 + toolbarH + 2, screenW - 4, screenH);
+          ctx.restore();
+       }
+       
+       // === TABLETS (iPad, Galaxy Tab, Surface) ===
+       else if (deviceId.includes('ipad') || deviceId.includes('galaxy-tab') || deviceId.includes('surface') || deviceId.includes('tablet')) {
+          h = width * 1.4;
+          const isLandscape = deviceId.includes('surface');
+          if (isLandscape) { h = width * 0.7; }
+          
+          ctx.shadowColor = 'rgba(0,0,0,0.3)';
+          ctx.shadowBlur = 15;
+          ctx.shadowOffsetY = 8;
+          
+          // Body
+          ctx.fillStyle = deviceId.includes('surface') ? '#2a2a2a' : '#1a1a1a';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 18);
+          ctx.fill();
+          ctx.shadowColor = 'transparent';
+          
+          // Metallic edge
+          ctx.strokeStyle = '#3a3a3c';
+          ctx.lineWidth = 2;
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 18);
+          ctx.stroke();
+          
+          // Screen
+          screenW = width * 0.94;
+          screenH = h * 0.94;
+          ctx.save();
+          ctx.beginPath();
+          roundRect(ctx, cx - screenW/2, cy - screenH/2, screenW, screenH, 8);
+          ctx.clip();
+          ctx.drawImage(img, cx - screenW/2, cy - screenH/2, screenW, screenH);
+          ctx.restore();
+          
+          // Camera
+          ctx.fillStyle = '#2a2a2e';
+          ctx.beginPath();
+          ctx.arc(cx, cy - h/2 + 12, 4, 0, Math.PI * 2);
+          ctx.fill();
+       }
+       
+       // === PHONES (iPhone, Pixel, Samsung) ===
+       else if (deviceId.includes('iphone') || deviceId.includes('pixel') || deviceId.includes('samsung') || deviceId.includes('phone')) {
+          h = width * 2.1;
+          
+          ctx.shadowColor = 'rgba(0,0,0,0.35)';
+          ctx.shadowBlur = 12;
+          ctx.shadowOffsetY = 6;
+          
+          // Body
+          ctx.fillStyle = '#111';
+          ctx.beginPath();
+          roundRect(ctx, cx - width/2, cy - h/2, width, h, 32);
+          ctx.fill();
+          ctx.shadowColor = 'transparent';
+          
+          // Dynamic Island / Notch
+          if (deviceId.includes('iphone-15') || deviceId.includes('iphone-14-pro')) {
+            // Dynamic Island
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            roundRect(ctx, cx - width*0.22, cy - h/2 + 12, width*0.44, 22, 11);
+            ctx.fill();
+          } else if (deviceId.includes('iphone')) {
+            // Notch
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            roundRect(ctx, cx - width*0.3, cy - h/2 + 8, width*0.6, 24, 12);
+            ctx.fill();
+          } else if (deviceId.includes('pixel')) {
+            // Pixel punch hole
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(cx, cy - h/2 + 20, 6, 0, Math.PI * 2);
+            ctx.fill();
+          } else if (deviceId.includes('samsung')) {
+            // Samsung punch hole
+            ctx.fillStyle = '#000';
+            ctx.beginPath();
+            ctx.arc(cx, cy - h/2 + 20, 5, 0, Math.PI * 2);
+            ctx.fill();
+          }
+          
+          // Screen
+          screenW = width * 0.92;
+          screenH = h * 0.94;
+          ctx.save();
+          ctx.beginPath();
+          roundRect(ctx, cx - screenW/2, cy - h/2 + (h*0.03), screenW, screenH, 24);
+          ctx.clip();
+          ctx.drawImage(img, cx - screenW/2, cy - h/2 + (h*0.03), screenW, screenH);
+          ctx.restore();
+       }
+       
+       // === FALLBACK ===
+       else {
+          h = width * 0.6;
+          ctx.drawImage(img, cx - width/2, cy - h/2, width, h);
+       }
+    }
+
+    // Event Listeners
+    overlay.querySelector('#close-showcase').onclick = () => overlay.remove();
+    overlay.querySelector('#download-showcase').onclick = () => {
+       const link = document.createElement('a');
+       link.download = `Showcase-${Date.now()}.png`;
+       link.href = canvas.toDataURL('image/png');
+       link.click();
+    };
+
+    // Active slot for assignment
+    let activeSlot = null;
+
+    // Template Switching (new .tpl-chip class)
+    const tplChips = overlay.querySelectorAll('.tpl-chip');
+    tplChips.forEach(btn => {
+      btn.onclick = () => {
+        tplChips.forEach(b => { 
+          b.classList.remove('active');
+          b.style.background = 'rgba(255,255,255,0.05)';
+          b.style.borderColor = 'rgba(255,255,255,0.08)';
+          b.style.color = 'rgba(255,255,255,0.6)';
+        });
+        btn.classList.add('active');
+        btn.style.background = 'rgba(99,102,241,0.2)';
+        btn.style.borderColor = 'rgba(99,102,241,0.5)';
+        btn.style.color = '#a5b4fc';
+        currentTemplate = btn.dataset.tpl;
+        items = [];
+        
+        const customControls = overlay.querySelector('#custom-controls');
+        if (currentTemplate === 'Custom') {
+          if (customControls) customControls.style.display = 'block';
+        } else {
+          if (customControls) customControls.style.display = 'none';
+        }
+        
+        // Auto-select "No Mockup" for fullpage templates
+        if (currentTemplate === 'Fullpage' || currentTemplate === 'Fullpage Split') {
+          overlay.querySelectorAll('.device-select').forEach(select => {
+            select.value = 'none';
+            const slot = parseInt(select.dataset.slot);
+            slotConfig[slot].deviceId = 'none';
+          });
+        }
+        
+        render();
+      };
+    });
+
+    // Screenshot Dropdown - Change which screenshot is in each slot
+    overlay.querySelectorAll('.screenshot-select').forEach(select => {
+      select.onchange = () => {
+        const slot = parseInt(select.dataset.slot);
+        const idx = parseInt(select.value);
+        sorted[slot] = selectedScreenshots[idx];
+        
+        // Update thumbnail
+        const thumb = overlay.querySelector(`.slot-thumb[data-slot="${slot}"]`);
+        if (thumb && sorted[slot]) {
+          thumb.innerHTML = `<img src="${sorted[slot].dataUrl}" style="width:100%;height:100%;object-fit:cover;">`;
+        }
+        render();
+      };
+    });
+
+    // Device Dropdown - Change which device frame is used
+    overlay.querySelectorAll('.device-select').forEach(select => {
+      select.onchange = () => {
+        const slot = parseInt(select.dataset.slot);
+        slotConfig[slot].deviceId = select.value;
+        render();
+      };
+    });
+
+    overlay.querySelectorAll('.slot-device-name').forEach(el => {
+      el.onclick = (e) => {
+        e.stopPropagation();
+        devicePickerSlot = parseInt(el.dataset.slot);
+        const category = ['desktop', 'tablet', 'phone'][devicePickerSlot];
+        
+        // Build device grid
+        devicePickerGrid.innerHTML = SHOWCASE_DEVICES[category].map(d => `
+          <button class="device-pick" data-id="${d.id}" style="padding:10px 8px;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.1);border-radius:8px;color:rgba(255,255,255,0.8);font-size:0.75rem;cursor:pointer;transition:all 0.2s;text-align:center;">
+            <div style="font-size:1.2rem;margin-bottom:4px;">${d.icon}</div>
+            ${d.name}
+          </button>
+        `).join('');
+        
+        // Position picker near clicked element
+        const rect = el.getBoundingClientRect();
+        devicePicker.style.display = 'block';
+        devicePicker.style.left = `${rect.left}px`;
+        devicePicker.style.top = `${rect.top - 200}px`;
+        
+        // Attach click handlers
+        devicePicker.querySelectorAll('.device-pick').forEach(btn => {
+          btn.onclick = () => {
+            slotConfig[devicePickerSlot].deviceId = btn.dataset.id;
+            // Update device name display
+            el.textContent = SHOWCASE_DEVICES[category].find(d => d.id === btn.dataset.id).name + ' ▾';
+            devicePicker.style.display = 'none';
+            render();
+          };
+        });
+      };
+    });
+
+    // Close device picker on click outside
+    overlay.onclick = (e) => {
+      if (!devicePicker.contains(e.target) && !e.target.classList.contains('slot-device-name')) {
+        devicePicker.style.display = 'none';
+      }
+    };
+
+    // Background Switching (new .bg-dot class)
+    overlay.querySelectorAll('.bg-dot').forEach(btn => {
+       btn.onclick = (e) => {
+          e.stopPropagation();
+          overlay.querySelectorAll('.bg-dot').forEach(b => b.style.borderColor = 'transparent');
+          btn.style.borderColor = '#fff';
+          const bgId = btn.dataset.bg;
+          const bg = BACKGROUNDS.find(b => b.id === bgId);
+          if (bg) {
+            bgGradient = bg.colors;
+          }
+          render();
+       };
     });
     
-    const desktopImg = await loadImage(desktop.dataUrl);
-    const tabletImg = await loadImage(tablet.dataUrl);
-    const mobileImg = await loadImage(mobile.dataUrl);
+    // Custom Background Color
+    const customBgColor = overlay.querySelector('#custom-bg-color');
+    if (customBgColor) {
+      customBgColor.oninput = () => {
+        // Deselect all preset backgrounds
+        overlay.querySelectorAll('.bg-dot').forEach(b => b.style.borderColor = 'transparent');
+        bgGradient = [customBgColor.value, customBgColor.value];
+        render();
+      };
+    }
     
-    // Draw desktop (MacBook) - center back
-    const laptopWidth = 900;
-    const laptopHeight = laptopWidth * (desktopImg.height / desktopImg.width);
-    const laptopX = (canvas.width - laptopWidth) / 2;
-    const laptopY = 80;
+    // Zoom Controls
+    const zoomInBtn = overlay.querySelector('#zoom-in');
+    const zoomOutBtn = overlay.querySelector('#zoom-out');
+    const zoomResetBtn = overlay.querySelector('#zoom-reset');
+    const zoomLevelEl = overlay.querySelector('#zoom-level');
     
-    // Laptop shadow
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 40;
-    ctx.shadowOffsetY = 20;
+    function updateZoom() {
+      canvas.style.transform = `scale(${zoomLevel})`;
+      zoomLevelEl.textContent = `${Math.round(zoomLevel * 100)}%`;
+    }
     
-    // Laptop bezel
-    ctx.fillStyle = '#1c1c1e';
-    roundRect(ctx, laptopX - 20, laptopY - 15, laptopWidth + 40, laptopHeight + 30, 12);
-    ctx.fill();
-    ctx.shadowColor = 'transparent';
+    if (zoomInBtn) zoomInBtn.onclick = () => { 
+      zoomLevel = Math.min(zoomLevel + 0.1, 2); 
+      updateZoom(); 
+    };
+    if (zoomOutBtn) zoomOutBtn.onclick = () => { 
+      zoomLevel = Math.max(zoomLevel - 0.1, 0.5); 
+      updateZoom(); 
+    };
+    if (zoomResetBtn) zoomResetBtn.onclick = () => { 
+      zoomLevel = 1; 
+      updateZoom(); 
+    };
     
-    // Laptop screen
-    ctx.save();
-    roundRect(ctx, laptopX, laptopY, laptopWidth, laptopHeight, 4);
-    ctx.clip();
-    ctx.drawImage(desktopImg, laptopX, laptopY, laptopWidth, laptopHeight);
-    ctx.restore();
+    // Slot Reorder Buttons
+    overlay.querySelectorAll('.slot-move-up').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const slotIdx = parseInt(btn.dataset.slot);
+        if (slotIdx > 0) {
+          // Swap with previous
+          [sorted[slotIdx], sorted[slotIdx - 1]] = [sorted[slotIdx - 1], sorted[slotIdx]];
+          render();
+          // Re-render slot assignments UI would require overlay refresh
+        }
+      };
+    });
     
-    // Laptop base
-    const baseY = laptopY + laptopHeight + 15;
-    ctx.fillStyle = '#2c2c2e';
-    ctx.beginPath();
-    ctx.moveTo(laptopX - 10, baseY);
-    ctx.lineTo(laptopX + laptopWidth + 10, baseY);
-    ctx.lineTo(laptopX + laptopWidth + 40, baseY + 25);
-    ctx.lineTo(laptopX - 40, baseY + 25);
-    ctx.closePath();
-    ctx.fill();
+    overlay.querySelectorAll('.slot-move-down').forEach(btn => {
+      btn.onclick = (e) => {
+        e.stopPropagation();
+        const slotIdx = parseInt(btn.dataset.slot);
+        if (slotIdx < sorted.length - 1) {
+          // Swap with next
+          [sorted[slotIdx], sorted[slotIdx + 1]] = [sorted[slotIdx + 1], sorted[slotIdx]];
+          render();
+        }
+      };
+    });
     
-    // Draw tablet (iPad) - right front
-    const tabletWidth = 280;
-    const tabletHeight = tabletWidth * (tabletImg.height / tabletImg.width);
-    const tabletX = canvas.width - 380;
-    const tabletY = canvas.height - tabletHeight - 100;
+    // Layer Controls (Custom mode)
+    const layerForward = overlay.querySelector('#layer-forward');
+    const layerBack = overlay.querySelector('#layer-back');
+    const itemDelete = overlay.querySelector('#item-delete');
+    const layoutReset = overlay.querySelector('#layout-reset');
     
-    ctx.shadowColor = 'rgba(0,0,0,0.4)';
-    ctx.shadowBlur = 30;
-    ctx.shadowOffsetY = 15;
+    if (layerForward) layerForward.onclick = () => {
+      const selectedIdx = items.findIndex(item => item.selected);
+      if (selectedIdx > -1 && selectedIdx < items.length - 1) {
+        [items[selectedIdx], items[selectedIdx + 1]] = [items[selectedIdx + 1], items[selectedIdx]];
+        render();
+      }
+    };
     
-    // iPad frame
-    ctx.fillStyle = '#1c1c1e';
-    roundRect(ctx, tabletX - 15, tabletY - 15, tabletWidth + 30, tabletHeight + 30, 20);
-    ctx.fill();
-    ctx.shadowColor = 'transparent';
+    if (layerBack) layerBack.onclick = () => {
+      const selectedIdx = items.findIndex(item => item.selected);
+      if (selectedIdx > 0) {
+        [items[selectedIdx], items[selectedIdx - 1]] = [items[selectedIdx - 1], items[selectedIdx]];
+        render();
+      }
+    };
     
-    // iPad screen
-    ctx.save();
-    roundRect(ctx, tabletX, tabletY, tabletWidth, tabletHeight, 8);
-    ctx.clip();
-    ctx.drawImage(tabletImg, tabletX, tabletY, tabletWidth, tabletHeight);
-    ctx.restore();
+    if (itemDelete) itemDelete.onclick = () => {
+      const selectedIdx = items.findIndex(item => item.selected);
+      if (selectedIdx > -1) {
+        items.splice(selectedIdx, 1);
+        updateCustomDeviceSelector();
+        render();
+      }
+    };
     
-    // Draw phone (iPhone) - left front
-    const phoneWidth = 180;
-    const phoneHeight = phoneWidth * (mobileImg.height / mobileImg.width);
-    const phoneX = 100;
-    const phoneY = canvas.height - phoneHeight - 80;
+    if (layoutReset) layoutReset.onclick = () => {
+      items = []; // Will reinitialize on next render
+      render();
+    };
+
+    // Custom dragging logic
+    canvas.onmousedown = (e) => {
+       if (currentTemplate !== 'Custom') return;
+       const rect = canvas.getBoundingClientRect();
+       const scaleX = canvas.width / rect.width;
+       const scaleY = canvas.height / rect.height;
+       const mx = (e.clientX - rect.left) * scaleX;
+       const my = (e.clientY - rect.top) * scaleY;
+       
+       // Hit test with proper height calculation based on device type
+       let hitItem = null;
+       for (let item of items) {
+          // Calculate height based on device type
+          const isPhone = item.deviceId.includes('phone') || item.deviceId.includes('iphone') || item.deviceId.includes('pixel') || item.deviceId.includes('samsung');
+          const isTablet = item.deviceId.includes('ipad') || item.deviceId.includes('tablet') || item.deviceId.includes('galaxy-tab') || item.deviceId.includes('surface');
+          const h = isPhone ? item.w * 2.1 : (isTablet ? item.w * 1.4 : item.w * 0.7);
+          
+          if (mx > item.x - item.w/2 && mx < item.x + item.w/2 &&
+              my > item.y - h/2 && my < item.y + h/2) {
+             hitItem = item;
+             isDragging = true;
+             dragItem = item;
+             dragItem.lastX = mx;
+             dragItem.lastY = my;
+             break;
+          }
+       }
+       
+       // Update selection
+       items.forEach(item => item.selected = false);
+       if (hitItem) {
+          hitItem.selected = true;
+       }
+       updateCustomDeviceSelector();
+       render();
+    };
     
-    ctx.shadowColor = 'rgba(0,0,0,0.5)';
-    ctx.shadowBlur = 30;
-    ctx.shadowOffsetY = 15;
+    canvas.onmousemove = (e) => {
+       if (isDragging && dragItem) {
+          const rect = canvas.getBoundingClientRect();
+          const scaleX = canvas.width / rect.width;
+          const scaleY = canvas.height / rect.height;
+          const mx = (e.clientX - rect.left) * scaleX;
+          const my = (e.clientY - rect.top) * scaleY;
+          
+          dragItem.x += (mx - dragItem.lastX);
+          dragItem.y += (my - dragItem.lastY);
+          dragItem.lastX = mx;
+          dragItem.lastY = my;
+          render();
+       }
+    };
     
-    // iPhone frame
-    ctx.fillStyle = '#1c1c1e';
-    roundRect(ctx, phoneX - 12, phoneY - 12, phoneWidth + 24, phoneHeight + 24, 35);
-    ctx.fill();
-    ctx.shadowColor = 'transparent';
+    canvas.onmouseup = () => { isDragging = false; dragItem = null; };
     
-    // iPhone screen
-    ctx.save();
-    roundRect(ctx, phoneX, phoneY, phoneWidth, phoneHeight, 28);
-    ctx.clip();
-    ctx.drawImage(mobileImg, phoneX, phoneY, phoneWidth, phoneHeight);
-    ctx.restore();
-    
-    // Dynamic island
-    ctx.fillStyle = '#000';
-    const pillWidth = 60;
-    const pillHeight = 18;
-    roundRect(ctx, phoneX + phoneWidth/2 - pillWidth/2, phoneY + 10, pillWidth, pillHeight, 9);
-    ctx.fill();
-    
-    // Home indicator
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
-    roundRect(ctx, phoneX + phoneWidth/2 - 35, phoneY + phoneHeight - 15, 70, 4, 2);
-    ctx.fill();
-    
-    // Download the showcase
-    const link = document.createElement('a');
-    link.href = canvas.toDataURL('image/png');
-    link.download = `DevShot_Showcase_${Date.now()}.png`;
-    link.click();
+    // Custom background color handler
+    const customBgInput = overlay.querySelector('#custom-bg-color');
+    if (customBgInput) {
+      customBgInput.addEventListener('input', (e) => {
+        const color = e.target.value;
+        bgGradient = [color, color];
+        overlay.querySelectorAll('.bg-btn').forEach(b => b.style.borderColor = 'transparent');
+        render();
+      });
+    }
+
+    document.body.appendChild(overlay);
+    // Initial Render
+    await render();
   }
 
   async function exportPdf() {
@@ -1326,12 +2495,18 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Preview modal
   function openPreview(screenshot) {
+    const isVideo = screenshot.captureType === 'video' || screenshot.filename?.endsWith('.webm');
+    
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
     overlay.innerHTML = `
       <div class="modal-content">
         <button class="modal-close">✕</button>
-        <img class="modal-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}">
+        ${isVideo ? `
+          <video class="modal-image" src="${screenshot.dataUrl}" controls autoplay style="max-width:90vw;max-height:85vh;"></video>
+        ` : `
+          <img class="modal-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}">
+        `}
       </div>
     `;
 
