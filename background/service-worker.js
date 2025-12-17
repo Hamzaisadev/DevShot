@@ -712,6 +712,9 @@ async function captureResponsiveViewport(url, viewport, delay = 3000) {
     
     await waitForTabLoad(newTab.id);
     
+    // Focus window for reliable capture
+    await chrome.windows.update(windowId, { focused: true });
+    
     // Wait for page content to load
     await sleep(delay > 0 ? delay : 3000);
     
@@ -750,6 +753,9 @@ async function captureResponsiveFullPage(url, viewport, delay = 3000) {
     const newTab = newWindow.tabs[0];
     
     await waitForTabLoad(newTab.id);
+    
+    // Focus window for reliable capture
+    await chrome.windows.update(windowId, { focused: true });
     
     // Wait for page content to load
     await sleep(delay > 0 ? delay : 3000);
