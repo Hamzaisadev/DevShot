@@ -229,7 +229,9 @@ document.addEventListener('DOMContentLoaded', () => {
     // Toggle selection by clicking info area
     infoArea.addEventListener('click', (e) => {
       e.stopPropagation();
-      toggleSelection(screenshot.id);
+      const isSelected = selectedIds.has(screenshot.id);
+      toggleSelect(screenshot.id, !isSelected);
+      checkbox.checked = !isSelected;
     });
 
     // Overlay Action: View
@@ -389,6 +391,75 @@ document.addEventListener('DOMContentLoaded', () => {
      alert('PDF Export coming in next update!');
   }
 
+  // Download all screenshots in a domain as a ZIP file
+  async function downloadDomainAsZip(domain, domainScreenshots, btn) {
+    // Check if JSZip is available
+    if (typeof JSZip === 'undefined') {
+      alert('ZIP functionality requires JSZip library. Please refresh the page.');
+      return;
+    }
+    
+    const originalText = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '⏳ Zipping...';
+    
+    try {
+      const zip = new JSZip();
+      const folder = zip.folder(domain.replace(/[^a-zA-Z0-9.-]/g, '_'));
+      
+      for (let i = 0; i < domainScreenshots.length; i++) {
+        const screenshot = domainScreenshots[i];
+        btn.innerHTML = `📦 ${i + 1}/${domainScreenshots.length}`;
+        
+        // Extract base64 data and determine file type
+        const dataUrl = screenshot.dataUrl;
+        const isVideo = screenshot.captureType === 'video' || screenshot.filename?.endsWith('.webm');
+        
+        // Get the base64 content (remove data:image/png;base64, or similar prefix)
+        const base64Data = dataUrl.split(',')[1];
+        
+        if (base64Data) {
+          // Determine extension based on data URL
+          let extension = 'png';
+          if (dataUrl.includes('image/jpeg')) extension = 'jpg';
+          else if (dataUrl.includes('image/webp')) extension = 'webp';
+          else if (dataUrl.includes('video/webm') || isVideo) extension = 'webm';
+          
+          // Create a clean filename
+          const filename = screenshot.filename || `screenshot_${screenshot.id}.${extension}`;
+          
+          // Add to ZIP
+          folder.file(filename, base64Data, { base64: true });
+        }
+      }
+      
+      btn.innerHTML = '💾 Saving...';
+      
+      // Generate and download ZIP
+      const content = await zip.generateAsync({ type: 'blob' });
+      const link = document.createElement('a');
+      link.href = URL.createObjectURL(content);
+      link.download = `${domain.replace(/[^a-zA-Z0-9.-]/g, '_')}_screenshots.zip`;
+      link.click();
+      URL.revokeObjectURL(link.href);
+      
+      btn.innerHTML = '✅ Done!';
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }, 2000);
+      
+    } catch (error) {
+      console.error('ZIP creation failed:', error);
+      btn.innerHTML = '❌ Failed';
+      alert('Failed to create ZIP file: ' + error.message);
+      setTimeout(() => {
+        btn.innerHTML = originalText;
+        btn.disabled = false;
+      }, 2000);
+    }
+  }
+
   function openPreview(screenshot) {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
@@ -453,13 +524,97 @@ document.addEventListener('DOMContentLoaded', () => {
       selectedItem: null
     };
 
-    // Auto-assign first few screenshots
+    // Smart Auto-assign: Match screenshots to slots based on device and capture type
     if (initialMode === 'single' && initialScreenshots[0]) {
-      state.assignments[0] = initialScreenshots[0];
+      // For single device, prefer viewport capture
+      const viewport = initialScreenshots.find(s => s.captureType === 'viewport');
+      state.assignments[0] = viewport || initialScreenshots[0];
     } else if (initialMode !== 'custom') {
-      initialScreenshots.slice(0, 4).forEach((s, i) => {
-        state.assignments[i] = s;
-      });
+      // Smart Auto-assign: Match screenshots to slots based on device and capture type
+      const TEMPLATES_INIT = [
+        { id: '3-device', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'tablet', type: 'viewport' },
+          { id: 2, device: 'mobile', type: 'viewport' }
+        ]},
+        { id: 'hero-layout', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'mobile', type: 'viewport' }
+        ]},
+        { id: 'floating-devices', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'tablet', type: 'viewport' },
+          { id: 2, device: 'mobile', type: 'viewport' }
+        ]},
+        { id: 'browser-comparison', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'desktop', type: 'viewport' }
+        ]},
+        { id: 'bold-color-grid', slots: [
+          { id: 0, device: 'any', type: 'fullpage' },
+          { id: 1, device: 'any', type: 'fullpage' },
+          { id: 2, device: 'any', type: 'fullpage' },
+          { id: 3, device: 'any', type: 'fullpage' }
+        ]},
+        // New templates
+        { id: 'app-store-style', slots: [
+          { id: 0, device: 'mobile', type: 'viewport' }
+        ]},
+        { id: 'landing-hero', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'mobile', type: 'viewport' }
+        ]},
+        { id: 'responsive-row', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'tablet', type: 'viewport' },
+          { id: 2, device: 'mobile', type: 'viewport' }
+        ]},
+        { id: 'before-after', slots: [
+          { id: 0, device: 'desktop', type: 'viewport' },
+          { id: 1, device: 'desktop', type: 'viewport' }
+        ]},
+        { id: 'fullpage-showcase', slots: [
+          { id: 0, device: 'any', type: 'fullpage' }
+        ]},
+        { id: 'page-comparison', slots: [
+          { id: 0, device: 'any', type: 'fullpage' },
+          { id: 1, device: 'any', type: 'fullpage' }
+        ]}
+      ];
+      
+      const templateConfig = TEMPLATES_INIT.find(t => t.id === state.template);
+      const usedIds = new Set();
+      
+      if (templateConfig) {
+        // Smart matching
+        templateConfig.slots.forEach(slot => {
+          let match = initialScreenshots.find(s => 
+            !usedIds.has(s.id) &&
+            (slot.device === 'any' || s.device === slot.device) &&
+            s.captureType === slot.type
+          );
+          // Fallback: any matching device
+          if (!match) {
+            match = initialScreenshots.find(s => 
+              !usedIds.has(s.id) && 
+              (slot.device === 'any' || s.device === slot.device)
+            );
+          }
+          // Final fallback: any unused
+          if (!match) {
+            match = initialScreenshots.find(s => !usedIds.has(s.id));
+          }
+          if (match) {
+            state.assignments[slot.id] = match;
+            usedIds.add(match.id);
+          }
+        });
+      } else {
+        // Default: just assign first few
+        initialScreenshots.slice(0, 4).forEach((s, i) => {
+          state.assignments[i] = s;
+        });
+      }
     }
 
     // Initialize Custom Items in custom mode
@@ -509,6 +664,82 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone' }
       ]},
       { id: 'bold-color-grid', name: 'Color Grid', icon: '⬛', slots: [0, 1, 2, 3].map(i => ({ id: i, defaultDevice: 'none', label: `Screen ${i+1}` })) },
+      // New Templates - Viewport Focused
+      { id: 'app-store-style', name: 'App Store', icon: '📲', slots: [
+        { id: 0, defaultDevice: 'iphone-15-pro', label: 'Phone' }
+      ]},
+      { id: 'landing-hero', name: 'Landing Hero', icon: '🚀', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Browser' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Floating Phone' }
+      ]},
+      { id: 'responsive-row', name: 'Responsive Row', icon: '📏', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Desktop' },
+        { id: 1, defaultDevice: 'ipad-air', label: 'Tablet' },
+        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone' }
+      ]},
+      { id: 'before-after', name: 'Before / After', icon: '🔄', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Before' },
+        { id: 1, defaultDevice: 'browser-light', label: 'After' }
+      ]},
+      // New Templates - Full Page Focused
+      { id: 'fullpage-showcase', name: 'Full Page', icon: '📄', slots: [
+        { id: 0, defaultDevice: 'none', label: 'Full Page' }
+      ]},
+      { id: 'page-comparison', name: 'Compare Pages', icon: '📑', slots: [
+        { id: 0, defaultDevice: 'none', label: 'Page 1' },
+        { id: 1, defaultDevice: 'none', label: 'Page 2' }
+      ]},
+      { id: 'triple-page', name: 'Triple Page', icon: '📃', slots: [
+        { id: 0, defaultDevice: 'none', label: 'Page 1' },
+        { id: 1, defaultDevice: 'none', label: 'Page 2' },
+        { id: 2, defaultDevice: 'none', label: 'Page 3' }
+      ]},
+      // New Templates - Presentation Style
+      { id: 'minimal-center', name: 'Minimal Center', icon: '◻️', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Main Screen' }
+      ]},
+      { id: 'laptop-phone-stack', name: 'Laptop + Phone', icon: '💻📱', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Laptop (Back)' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Phone (Front)' }
+      ]},
+      { id: 'dual-phone', name: 'Dual Phone', icon: '📱📱', slots: [
+        { id: 0, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Phone 2' }
+      ]},
+      { id: 'triple-phone', name: 'Triple Phone', icon: '📱📱📱', slots: [
+        { id: 0, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Phone 2' },
+        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone 3' }
+      ]},
+      { id: 'tablet-centered', name: 'Tablet Center', icon: '📲', slots: [
+        { id: 0, defaultDevice: 'ipad-pro-12', label: 'Tablet' }
+      ]},
+      { id: 'laptop-centered', name: 'Laptop Center', icon: '💻', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Laptop' }
+      ]},
+      { id: 'browser-centered', name: 'Browser Center', icon: '🌐', slots: [
+        { id: 0, defaultDevice: 'browser-chrome', label: 'Browser' }
+      ]},
+      // New Templates - Text-Ready / Marketing
+      { id: 'saas-hero', name: 'SaaS Hero', icon: '💼', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Product Shot' }
+      ]},
+      { id: 'feature-left', name: 'Feature Left', icon: '⬅️', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Feature Screen' }
+      ]},
+      { id: 'feature-right', name: 'Feature Right', icon: '➡️', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Feature Screen' }
+      ]},
+      { id: 'product-spotlight', name: 'Spotlight', icon: '🔦', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Main Product' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Mobile View' }
+      ]},
+      { id: 'multi-device-wave', name: 'Device Wave', icon: '🌊', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Desktop' },
+        { id: 1, defaultDevice: 'ipad-air', label: 'Tablet' },
+        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
+        { id: 3, defaultDevice: 'iphone-15-pro', label: 'Phone 2' }
+      ]},
       { id: 'custom', name: 'Custom Canvas', icon: '🎨', slots: [] }
     ];
 
@@ -579,21 +810,16 @@ document.addEventListener('DOMContentLoaded', () => {
           </div>
         </div>
 
-        <!-- CENTER: Canvas -->
-        <div class="ui-canvas-area" style="flex:1;background:#050505;position:relative;display:flex;flex-direction:column;overflow:hidden;">
-          <div class="canvas-toolbar" style="padding:16px;display:flex;justify-content:space-between;align-items:center;position:absolute;top:0;left:0;right:0;z-index:10;">
-            <div class="zoom-controls" style="display:flex;gap:4px;background:rgba(30,30,35,0.8);backdrop-filter:blur(4px);padding:4px;border-radius:8px;border:1px solid rgba(255,255,255,0.1);">
-              <button id="zoom-out" style="width:32px;height:32px;background:transparent;border:none;color:white;cursor:pointer;font-size:1.2rem;">-</button>
-              <span id="zoom-level" style="line-height:32px;font-size:0.8rem;color:rgba(255,255,255,0.7);min-width:40px;text-align:center;">80%</span>
-              <button id="zoom-in" style="width:32px;height:32px;background:transparent;border:none;color:white;cursor:pointer;font-size:1.2rem;">+</button>
-            </div>
+        <!-- CENTER: Canvas (Fixed, no scroll) -->
+        <div class="ui-canvas-area" style="flex:1;background:repeating-linear-gradient(45deg,#08080a,#08080a 10px,#0a0a0c 10px,#0a0a0c 20px);position:relative;display:flex;flex-direction:column;overflow:hidden;">
+          <div class="canvas-toolbar" style="padding:16px;display:flex;justify-content:flex-end;align-items:center;position:absolute;top:0;left:0;right:0;z-index:10;">
             <button id="download-btn" style="padding:10px 24px;background:#6366f1;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(99,102,241,0.4);display:flex;align-items:center;gap:8px;">
               <span>💾</span> Save Image
             </button>
           </div>
           
-          <div class="canvas-scroller" style="flex:1;overflow:auto;display:flex;align-items:center;justify-content:center;padding:0;">
-            <canvas id="main-canvas" style="box-shadow:0 0 100px rgba(0,0,0,0.8);border-radius:4px; margin:auto;"></canvas>
+          <div class="canvas-container" style="flex:1;display:flex;align-items:center;justify-content:center;padding:60px 40px 40px 40px;">
+            <canvas id="main-canvas" style="box-shadow:0 25px 80px rgba(0,0,0,0.6);border-radius:12px;max-width:100%;max-height:100%;object-fit:contain;"></canvas>
           </div>
           
           <div id="custom-hint" style="position:absolute;bottom:20px;left:50%;transform:translateX(-50%);color:rgba(255,255,255,0.5);font-size:0.85rem;background:rgba(0,0,0,0.5);padding:6px 16px;border-radius:20px;display:none;">
@@ -817,16 +1043,26 @@ document.addEventListener('DOMContentLoaded', () => {
             <h2 style="margin:0;color:white;font-size:1.4rem;">Select Screenshot</h2>
             <button id="close-selector" style="background:none;border:none;color:white;font-size:2rem;cursor:pointer;">&times;</button>
           </div>
-          <div style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:16px;">
+          <div style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:16px;">
             ${sortedScreenshots.map(s => {
               const isAssigned = assignedIds.has(s.id);
+              // Better aspect ratio based on device
+              const aspectRatio = s.device === 'mobile' ? '9/16' : '16/10';
+              // Device emoji
+              const deviceIcon = s.device === 'mobile' ? '📱' : s.device === 'tablet' ? '📲' : '🖥️';
+              // Capture type badge
+              const typeLabel = s.captureType === 'fullpage' ? 'Full Page' : 'Viewport';
+              const typeBg = s.captureType === 'fullpage' ? '#8b5cf6' : '#22c55e';
+              
               return `
-              <div class="picker-thumb ${isAssigned ? 'assigned' : ''}" data-id="${s.id}" style="border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;cursor:${isAssigned ? 'not-allowed' : 'pointer'};border:2px solid transparent;transition:all 0.2s;position:relative;opacity:${isAssigned ? '0.4' : '1'};">
+              <div class="picker-thumb ${isAssigned ? 'assigned' : ''}" data-id="${s.id}" style="border-radius:12px;overflow:hidden;background:#000;aspect-ratio:${aspectRatio};cursor:${isAssigned ? 'not-allowed' : 'pointer'};border:2px solid transparent;transition:all 0.2s;position:relative;opacity:${isAssigned ? '0.4' : '1'};max-height:200px;">
                 <img src="${s.dataUrl}" style="width:100%;height:100%;object-fit:cover;object-position:top;">
-                <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent, rgba(0,0,0,0.8));padding:8px;font-size:0.75rem;color:white;">
-                  ${s.domain}
+                <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent, rgba(0,0,0,0.9));padding:10px;">
+                  <div style="font-size:0.8rem;color:white;font-weight:600;margin-bottom:4px;">${deviceIcon} ${s.device || 'desktop'}</div>
+                  <div style="font-size:0.65rem;color:rgba(255,255,255,0.7);">${s.domain}</div>
                 </div>
-                ${isAssigned ? `<div style="position:absolute;top:8px;right:8px;background:#ef4444;color:white;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:600;">IN USE</div>` : ''}
+                <div style="position:absolute;top:8px;left:8px;background:${typeBg};color:white;padding:2px 8px;border-radius:4px;font-size:0.6rem;font-weight:600;">${typeLabel}</div>
+                ${isAssigned ? `<div style="position:absolute;top:8px;right:8px;background:#ef4444;color:white;padding:2px 8px;border-radius:4px;font-size:0.6rem;font-weight:600;">IN USE</div>` : ''}
               </div>
             `}).join('')}
           </div>
@@ -1028,9 +1264,11 @@ document.addEventListener('DOMContentLoaded', () => {
         ctx.restore();
       }
       else if (state.template === 'floating-devices') {
-        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 500, 540, 500);
-        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1500, 540, 280);
-        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 1000); // Main laptop on top
+        // Draw laptop FIRST (behind)
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 480, 1000);
+        // Then tablet and phone on top
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 480, 580, 450);
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1450, 620, 280);
       }
       else if (state.template === 'bold-color-grid') {
         const padding = 100;
@@ -1049,6 +1287,252 @@ document.addEventListener('DOMContentLoaded', () => {
         drawGridItem(1, padding*2 + w, padding);
         drawGridItem(2, padding, padding*2 + h);
         drawGridItem(3, padding*2 + w, padding*2 + h);
+      }
+      // NEW: App Store Style - Centered phone with gradient glow
+      else if (state.template === 'app-store-style') {
+        // Draw glow behind phone
+        ctx.save();
+        const gradient = ctx.createRadialGradient(960, 540, 0, 960, 540, 600);
+        gradient.addColorStop(0, 'rgba(99,102,241,0.3)');
+        gradient.addColorStop(1, 'rgba(99,102,241,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 1920, 1080);
+        ctx.restore();
+        
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 400);
+      }
+      // NEW: Landing Hero - Large browser with floating phone
+      else if (state.template === 'landing-hero') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 850, 520, 1200);
+        if(loaded[1]) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.6)';
+          ctx.shadowBlur = 80;
+          ctx.shadowOffsetY = 40;
+          drawDevice(ctx, getSlotDevice(1), loaded[1], 1500, 620, 320);
+          ctx.restore();
+        }
+      }
+      // NEW: Responsive Row - Three devices side by side
+      else if (state.template === 'responsive-row') {
+        const baseY = 540;
+        // Desktop left
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 420, baseY, 720);
+        // Tablet center  
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1000, baseY + 60, 380);
+        // Phone right
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1520, baseY + 100, 280);
+      }
+      // NEW: Before/After - Two browsers with comparison divider
+      else if (state.template === 'before-after') {
+        // Constrain images to fit properly (especially for fullpage)
+        const maxBrowserW = 750;
+        const maxBrowserH = 800;
+        
+        const drawConstrainedDevice = (slotId, cx) => {
+          if (!loaded[slotId]) return;
+          const img = loaded[slotId];
+          let w = maxBrowserW;
+          let h = w * (img.height / img.width);
+          if (h > maxBrowserH) {
+            h = maxBrowserH;
+            w = h * (img.width / img.height);
+          }
+          drawDevice(ctx, getSlotDevice(slotId), loaded[slotId], cx, 540, w);
+        };
+        
+        drawConstrainedDevice(0, 500);
+        drawConstrainedDevice(1, 1420);
+        
+        // Divider with labels
+        ctx.save();
+        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
+        ctx.lineWidth = 3;
+        ctx.setLineDash([10, 5]);
+        ctx.beginPath();
+        ctx.moveTo(960, 80);
+        ctx.lineTo(960, 1000);
+        ctx.stroke();
+        ctx.setLineDash([]);
+        
+        // Labels
+        ctx.font = 'bold 24px Inter, system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.8)';
+        ctx.textAlign = 'center';
+        ctx.fillText('BEFORE', 500, 120);
+        ctx.fillText('AFTER', 1420, 120);
+        ctx.restore();
+      }
+      // NEW: Full Page Showcase - Single full-page with decorative frame
+      else if (state.template === 'fullpage-showcase') {
+        if(loaded[0]) {
+          const img = loaded[0];
+          const maxH = 900;
+          const maxW = 1400;
+          let w = maxW;
+          let h = w * (img.height / img.width);
+          if (h > maxH) {
+            h = maxH;
+            w = h * (img.width / img.height);
+          }
+          
+          // Decorative shadow
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 60;
+          ctx.shadowOffsetY = 30;
+          
+          // Frame
+          ctx.fillStyle = '#1c1c1e';
+          roundRect(ctx, 960 - w/2 - 12, 540 - h/2 - 12, w + 24, h + 24, 16);
+          ctx.fill();
+          
+          // Image
+          ctx.drawImage(img, 960 - w/2, 540 - h/2, w, h);
+          ctx.restore();
+        }
+      }
+      // NEW: Page Comparison - Two full pages side by side
+      else if (state.template === 'page-comparison') {
+        const maxH = 850;
+        const spacing = 80;
+        const totalW = 1920 - spacing * 3;
+        const halfW = totalW / 2;
+        
+        [0, 1].forEach((slotId, i) => {
+          if(!loaded[slotId]) return;
+          const img = loaded[slotId];
+          let w = halfW;
+          let h = w * (img.height / img.width);
+          if (h > maxH) {
+            h = maxH;
+            w = h * (img.width / img.height);
+          }
+          const cx = spacing + halfW/2 + (i * (halfW + spacing));
+          
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.4)';
+          ctx.shadowBlur = 40;
+          ctx.shadowOffsetY = 20;
+          ctx.drawImage(img, cx - w/2, 540 - h/2, w, h);
+          ctx.restore();
+        });
+        
+        // Page number labels
+        ctx.font = 'bold 18px Inter, system-ui, sans-serif';
+        ctx.fillStyle = 'rgba(255,255,255,0.6)';
+        ctx.textAlign = 'center';
+        ctx.fillText('PAGE 1', spacing + halfW/2, 1000);
+        ctx.fillText('PAGE 2', spacing + halfW/2 + halfW + spacing, 1000);
+      }
+      // NEW: Triple Page - Three full pages side by side
+      else if (state.template === 'triple-page') {
+        const maxH = 800;
+        const spacing = 60;
+        const thirdW = (1920 - spacing * 4) / 3;
+        
+        [0, 1, 2].forEach((slotId, i) => {
+          if(!loaded[slotId]) return;
+          const img = loaded[slotId];
+          let w = thirdW;
+          let h = w * (img.height / img.width);
+          if (h > maxH) {
+            h = maxH;
+            w = h * (img.width / img.height);
+          }
+          const cx = spacing + thirdW/2 + (i * (thirdW + spacing));
+          
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.4)';
+          ctx.shadowBlur = 30;
+          ctx.shadowOffsetY = 15;
+          ctx.drawImage(img, cx - w/2, 540 - h/2, w, h);
+          ctx.restore();
+        });
+      }
+      // NEW: Minimal Center - Single browser, centered with lots of space
+      else if (state.template === 'minimal-center') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 1100);
+      }
+      // NEW: Laptop + Phone Stack - Laptop behind, phone in front
+      else if (state.template === 'laptop-phone-stack') {
+        // Draw laptop FIRST (behind)
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 880, 500, 1100);
+        // Draw phone SECOND (in front)
+        if(loaded[1]) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.6)';
+          ctx.shadowBlur = 60;
+          ctx.shadowOffsetY = 30;
+          drawDevice(ctx, getSlotDevice(1), loaded[1], 1450, 600, 300);
+          ctx.restore();
+        }
+      }
+      // NEW: Dual Phone - Two phones side by side
+      else if (state.template === 'dual-phone') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 640, 540, 340);
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1280, 540, 340);
+      }
+      // NEW: Triple Phone - Three phones in a row
+      else if (state.template === 'triple-phone') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 480, 540, 300);
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 960, 540, 300);
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1440, 540, 300);
+      }
+      // NEW: Tablet Center - Single tablet centered
+      else if (state.template === 'tablet-centered') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 550);
+      }
+      // NEW: Laptop Center - Single laptop centered
+      else if (state.template === 'laptop-centered') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 1200);
+      }
+      // NEW: Browser Center - Single browser centered
+      else if (state.template === 'browser-centered') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 1200);
+      }
+      // NEW: SaaS Hero - Laptop on top-right area with space for text on left
+      else if (state.template === 'saas-hero') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 1150, 540, 1100);
+      }
+      // NEW: Feature Left - Device on left side with space for text on right
+      else if (state.template === 'feature-left') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 560, 540, 900);
+      }
+      // NEW: Feature Right - Device on right side with space for text on left
+      else if (state.template === 'feature-right') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 1360, 540, 900);
+      }
+      // NEW: Product Spotlight - Main browser with floating phone spotlight
+      else if (state.template === 'product-spotlight') {
+        // Draw glow effect behind devices
+        ctx.save();
+        const gradient = ctx.createRadialGradient(960, 540, 0, 960, 540, 700);
+        gradient.addColorStop(0, 'rgba(99,102,241,0.2)');
+        gradient.addColorStop(1, 'rgba(99,102,241,0)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 0, 1920, 1080);
+        ctx.restore();
+        
+        // Browser behind
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 820, 500, 1000);
+        // Phone in front
+        if(loaded[1]) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 50;
+          ctx.shadowOffsetY = 25;
+          drawDevice(ctx, getSlotDevice(1), loaded[1], 1450, 620, 300);
+          ctx.restore();
+        }
+      }
+      // NEW: Multi-Device Wave - 4 devices in a wave pattern
+      else if (state.template === 'multi-device-wave') {
+        // Draw back to front
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 400, 480, 700);  // Desktop back-left
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 850, 560, 400);  // Tablet
+        if(loaded[3]) drawDevice(ctx, getSlotDevice(3), loaded[3], 1500, 620, 240); // Phone 2 (behind Phone 1)
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1280, 580, 260); // Phone 1
       }
     }
 
@@ -1086,8 +1570,54 @@ document.addEventListener('DOMContentLoaded', () => {
     // Template Switch
     overlay.querySelectorAll('.tpl-btn').forEach(btn => {
       btn.onclick = () => {
-        state.template = btn.dataset.id;
+        const newTemplate = btn.dataset.id;
+        
+        // Clear assignments when switching templates (fixes 'in use' bug)
+        state.assignments = {};
+        
+        // Clear custom items when leaving custom mode
+        if (state.template === 'custom' && newTemplate !== 'custom') {
+          state.customItems = [];
+        }
+        
+        state.template = newTemplate;
         state.selectedItem = null;
+        
+        // Auto-assign screenshots to new template slots
+        if (newTemplate !== 'custom') {
+          const templateConfig = TEMPLATES.find(t => t.id === newTemplate);
+          if (templateConfig && templateConfig.slots.length > 0) {
+            const usedIds = new Set();
+            templateConfig.slots.forEach(slot => {
+              // Find best matching screenshot for this slot
+              const slotDeviceHint = slot.defaultDevice;
+              const isPhoneSlot = slotDeviceHint.includes('phone') || slotDeviceHint.includes('pixel') || slotDeviceHint.includes('samsung');
+              const isTabletSlot = slotDeviceHint.includes('ipad') || slotDeviceHint.includes('surface') || slotDeviceHint.includes('tablet');
+              const isFullPageSlot = slotDeviceHint === 'none';
+              
+              let match = null;
+              // Try to match by device and capture type
+              if (isFullPageSlot) {
+                match = state.available.find(s => !usedIds.has(s.id) && s.captureType === 'fullpage');
+              } else if (isPhoneSlot) {
+                match = state.available.find(s => !usedIds.has(s.id) && s.device === 'mobile' && s.captureType === 'viewport');
+              } else if (isTabletSlot) {
+                match = state.available.find(s => !usedIds.has(s.id) && s.device === 'tablet' && s.captureType === 'viewport');
+              } else {
+                match = state.available.find(s => !usedIds.has(s.id) && s.device === 'desktop' && s.captureType === 'viewport');
+              }
+              // Fallback: any unused screenshot
+              if (!match) {
+                match = state.available.find(s => !usedIds.has(s.id));
+              }
+              if (match) {
+                state.assignments[slot.id] = match;
+                usedIds.add(match.id);
+              }
+            });
+          }
+        }
+        
         overlay.querySelectorAll('.tpl-btn').forEach(b => {
           b.classList.remove('active');
           b.style.background = 'transparent';
@@ -1128,22 +1658,7 @@ document.addEventListener('DOMContentLoaded', () => {
         state.background = { type: 'solid', value: e.target.value };
         render();
     };
-
-    // Zoom
-    const zoomEl = overlay.querySelector('#zoom-level');
-    overlay.querySelector('#zoom-in').onclick = () => {
-       state.zoom = Math.min(state.zoom + 0.1, 2);
-       updateZoom();
-    };
-    overlay.querySelector('#zoom-out').onclick = () => {
-       state.zoom = Math.max(state.zoom - 0.1, 0.5);
-       updateZoom();
-    };
-    function updateZoom() {
-      canvas.style.transform = `scale(${state.zoom})`;
-      zoomEl.textContent = Math.round(state.zoom * 100) + '%';
-    }
-    updateZoom(); // Init
+    // Canvas is now fixed scale - no zoom needed
 
     // Download Image
     overlay.querySelector('#download-btn').addEventListener('click', async (e) => {
@@ -1278,10 +1793,17 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.shadowOffsetY = y;
     };
 
-    // --- No Frame ---
+    // --- No Frame (fullpage/viewport without device) ---
     if (deviceId === 'none') {
       ctx.save();
       applyShadow(30, 10);
+      // Constrain height to fit in canvas (fix fullpage overflow)
+      const maxH = 900; // Leave some margin from 1080 canvas height
+      if (h > maxH) {
+        const scale = maxH / h;
+        h = maxH;
+        width = width * scale;
+      }
       ctx.drawImage(img, cx - width/2, cy - h/2, width, h);
       ctx.restore();
       return;
@@ -1358,11 +1880,15 @@ document.addEventListener('DOMContentLoaded', () => {
       
       ctx.restore();
     }
-    // --- Phone / Tablet ---
+    // --- Phone ---
     else if (isPhone) {
-      h = width * 2.16;
-      const radius = width * 0.15;
-      const bezel = width * 0.05;
+      // Fixed aspect ratio for phone (more realistic, fits better)
+      h = Math.min(width * 2.0, 850); // Max height to fit in canvas
+      // Adjust width if height was capped
+      if (h === 850) width = h / 2.0;
+      
+      const radius = width * 0.12;
+      const bezel = width * 0.04;
       
       ctx.save();
       applyShadow(50, 25);
