@@ -7,7 +7,8 @@
 
 // Default settings
 const DEFAULT_SETTINGS = {
-  defaultDelay: 3000,
+  defaultDelay: 1000,
+
   freezeAnimations: true,
   hidePreloaders: true,
   enableMockups: false,
@@ -39,6 +40,8 @@ async function getViewports() {
     tablet: { width: settings.tabletWidth, height: settings.tabletHeight }
   };
 }
+
+let captureDelay = 3000; // Global delay state
 
 // ============================================
 // Capture Queue - Prevents race conditions
@@ -158,9 +161,13 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
       const newTab = newWindow.tabs[0];
       
       await waitForTabLoad(newTab.id);
-      await sleep(delay > 0 ? delay : 3000);
-      await disableAnimationsAndPreloaders(newTab.id);
-      await sleep(500);
+      
+      // Delay for page to render (2 seconds)
+      await sleep(2000);
+      
+      // Focus window for capture
+      await chrome.windows.update(windowId, { focused: true });
+
       
       let imageData;
       if (captureType === 'viewport') {
@@ -209,9 +216,13 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
       const newTab = newWindow.tabs[0];
       
       await waitForTabLoad(newTab.id);
-      await sleep(delay > 0 ? delay : 3000);
-      await disableAnimationsAndPreloaders(newTab.id);
-      await sleep(500);
+      
+      // Delay for page to render (2 seconds)
+      await sleep(2000);
+      
+      // Focus window for capture
+      await chrome.windows.update(windowId, { focused: true });
+
       
       let imageData;
       if (captureType === 'viewport') {
@@ -462,9 +473,10 @@ async function executeCapture(type, providedTab = null, delay = null) {
       return { success: false, error: 'No active tab found' };
     }
 
-    // Skip chrome:// and edge:// URLs
-    if (tab.url.startsWith('chrome://') || tab.url.startsWith('edge://') || tab.url.startsWith('about:')) {
-      return { success: false, error: 'Cannot capture browser internal pages' };
+    // Skip chrome://, edge://, chrome-extension://, and other internal pages
+    const internalProtocols = ['chrome:', 'edge:', 'about:', 'chrome-extension:', 'view-source:'];
+    if (internalProtocols.some(proto => tab.url.startsWith(proto))) {
+      return { success: false, error: 'Cannot capture browser internal or extension pages' };
     }
 
     const url = new URL(tab.url);
@@ -473,33 +485,29 @@ async function executeCapture(type, providedTab = null, delay = null) {
 
     const [device, captureType] = type.split('-');
     
-    // Apply delay for ALL devices (not just desktop) to allow page to fully load
+    // Respect user delay or use default
     const waitTime = delay !== null ? delay : settings.defaultDelay;
-    if (waitTime > 0) {
-      console.log(`[DevShot] Waiting ${waitTime}ms for page to fully load...`);
-      await sleep(waitTime);
-    }
     
     let imageData;
-
-    console.log(`Capturing: ${type} for ${domain}`);
+    console.log(`[DevShot] Executing ${type} capture for ${domain}`);
 
     if (device === 'desktop') {
       if (captureType === 'viewport') {
+        // Desktop Viewport
+        if (waitTime > 0) await sleep(waitTime);
         imageData = await captureViewport(tab);
       } else {
-        imageData = await captureFullPage(tab, settings);
+        // Desktop Full Page
+        imageData = await captureFullPage(tab, waitTime);
       }
     } else {
       const viewport = viewports[device];
-      if (!viewport) {
-        return { success: false, error: `Unknown device: ${device}` };
-      }
+      if (!viewport) return { success: false, error: `Unknown device: ${device}` };
       
       if (captureType === 'viewport') {
-        imageData = await captureResponsiveViewport(tab.url, viewport, waitTime, settings);
+        imageData = await captureResponsiveViewport(tab.url, viewport, waitTime);
       } else {
-        imageData = await captureResponsiveFullPage(tab.url, viewport, waitTime, settings);
+        imageData = await captureResponsiveFullPage(tab.url, viewport, waitTime);
       }
     }
 
@@ -535,7 +543,7 @@ async function executeCapture(type, providedTab = null, delay = null) {
     return { success: true, filename };
 
   } catch (error) {
-    console.error('Capture error:', error);
+    console.error('[DevShot] Executor error:', error);
     return { success: false, error: error.message };
   }
 }
@@ -561,134 +569,99 @@ async function captureViewport(tab) {
   }
 }
 
-async function captureFullPage(tab) {
+async function captureFullPage(tab, initialDelay = 3000) {
   try {
+    // Wait initial delay
+    if (initialDelay > 0) await sleep(initialDelay);
+    
     // Get page dimensions
     const [{ result: dimensions }] = await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => ({
         scrollHeight: Math.max(document.body.scrollHeight, document.documentElement.scrollHeight),
-        scrollWidth: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth),
         viewportHeight: window.innerHeight,
-        viewportWidth: window.innerWidth,
         devicePixelRatio: window.devicePixelRatio || 1
       })
     });
 
-    const { scrollHeight, scrollWidth, viewportHeight, devicePixelRatio } = dimensions;
+    const { scrollHeight, viewportHeight } = dimensions;
     
     // If page fits in viewport, just capture visible
-    if (scrollHeight <= viewportHeight) {
+    if (scrollHeight <= viewportHeight + 10) {
       return await captureViewport(tab);
     }
 
-    const numCaptures = Math.ceil(scrollHeight / viewportHeight);
-    const captures = [];
-
-    // Disable smooth scrolling and scroll-snap
+    // Disable smooth scrolling to prevent blurry captures
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
         const style = document.createElement('style');
-        style.id = 'devshot-scroll-override';
-        style.textContent = `
-          *, html, body {
-            scroll-behavior: auto !important;
-            scroll-snap-type: none !important;
-            scroll-snap-align: none !important;
-          }
-        `;
+        style.id = 'devshot-scroll-lock';
+        style.textContent = 'html, body { scroll-behavior: auto !important; }';
         document.head.appendChild(style);
       }
     });
 
-    // Scroll to top
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-      }
-    });
-    await sleep(300);
+    const captures = [];
+    const numCaptures = Math.ceil(scrollHeight / viewportHeight);
 
-    // Capture each segment
     for (let i = 0; i < numCaptures; i++) {
-      const scrollY = i * viewportHeight;
-      
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (y) => {
-          document.documentElement.scrollTop = y;
-          document.body.scrollTop = y;
-        },
-        args: [scrollY]
-      });
-      
-      // Chrome limits captureVisibleTab to ~1 per second
-      await sleep(1200);
-      
-      const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, {
-        format: 'png'
-      });
-      
-      captures.push({
-        dataUrl,
-        y: scrollY,
-        height: Math.min(viewportHeight, scrollHeight - scrollY)
-      });
-      
-      // After first capture, hide fixed/sticky elements so navbar only shows at top
-      if (i === 0) {
+        const y = i * viewportHeight;
+        const actualY = Math.min(y, scrollHeight - viewportHeight);
+        
         await chrome.scripting.executeScript({
           target: { tabId: tab.id },
-          func: () => {
-            document.querySelectorAll('*').forEach(el => {
-              const computed = window.getComputedStyle(el);
-              if (computed.position === 'fixed' || computed.position === 'sticky') {
-                el.dataset.devshotHidden = 'true';
-                el.dataset.devshotOriginalDisplay = el.style.display || '';
-                el.style.setProperty('display', 'none', 'important');
-              }
-            });
-          }
+          func: (newY) => window.scrollTo(0, newY),
+          args: [actualY]
         });
-      }
+
+        // Longer delay for full page segments to allow rendering
+        await sleep(2000);
+
+        const dataUrl = await chrome.tabs.captureVisibleTab(tab.windowId, { format: 'png' });
+        
+        captures.push({
+          dataUrl,
+          y: actualY,
+          height: viewportHeight
+        });
+
+        // Hide sticky/fixed elements after first segment
+        if (i === 0) {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              const elements = document.querySelectorAll('*');
+              elements.forEach(el => {
+                const pos = window.getComputedStyle(el).position;
+                if (pos === 'fixed' || pos === 'sticky') {
+                  el.dataset.dsHidden = 'true';
+                  el.style.setProperty('display', 'none', 'important');
+                }
+              });
+            }
+          });
+        }
     }
 
-    // STEP 4: Cleanup - restore hidden elements and remove scroll override
+    // Restore elements
     await chrome.scripting.executeScript({
       target: { tabId: tab.id },
       func: () => {
-        // Remove scroll override style
-        const scrollStyle = document.getElementById('devshot-scroll-override');
-        if (scrollStyle) scrollStyle.remove();
-        
-        // Restore hidden elements
-        document.querySelectorAll('[data-devshot-hidden="true"]').forEach(el => {
-          el.style.display = el.dataset.devshotOriginalDisplay || '';
-          delete el.dataset.devshotHidden;
-          delete el.dataset.devshotOriginalDisplay;
+        document.querySelectorAll('[data-ds-hidden]').forEach(el => {
+          el.style.display = '';
+          delete el.dataset.dsHidden;
         });
-        
-        console.log('[DevShot] Restored hidden elements');
+        const style = document.getElementById('devshot-scroll-lock');
+        if (style) style.remove();
+        window.scrollTo(0, 0);
       }
     });
 
-    // Scroll back to top
-    await chrome.scripting.executeScript({
-      target: { tabId: tab.id },
-      func: () => {
-        document.documentElement.scrollTop = 0;
-        document.body.scrollTop = 0;
-      }
-    });
-
-    // Stitch images
-    return await stitchImages(captures, { scrollWidth, scrollHeight, viewportHeight, devicePixelRatio });
+    return await stitchImages(captures, dimensions);
 
   } catch (error) {
-    console.error('Full page capture error:', error);
+    console.error('[DevShot] FullPage error:', error);
     throw error;
   }
 }
@@ -712,21 +685,19 @@ async function captureResponsiveViewport(url, viewport, delay = 3000) {
     
     await waitForTabLoad(newTab.id);
     
-    // Focus window for reliable capture
+    // Delay for page to render
+    await sleep(2000);
+    
+    // Focus and capture
     await chrome.windows.update(windowId, { focused: true });
-    
-    // Wait for page content to load
-    await sleep(delay > 0 ? delay : 3000);
-    
-    // Disable animations and hide preloaders
-    await disableAnimationsAndPreloaders(newTab.id);
-    await sleep(500); // Let CSS apply
     
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
       format: 'png'
     });
     
     return dataUrl;
+
+
     
   } finally {
     if (windowId) {
@@ -734,6 +705,8 @@ async function captureResponsiveViewport(url, viewport, delay = 3000) {
     }
   }
 }
+
+
 
 async function captureResponsiveFullPage(url, viewport, delay = 3000) {
   let windowId = null;
@@ -754,17 +727,15 @@ async function captureResponsiveFullPage(url, viewport, delay = 3000) {
     
     await waitForTabLoad(newTab.id);
     
-    // Focus window for reliable capture
+    // Delay for page to render
+    await sleep(2000);
+    
+    // Focus and capture
     await chrome.windows.update(windowId, { focused: true });
     
-    // Wait for page content to load
-    await sleep(delay > 0 ? delay : 3000);
-    
-    // Disable animations and hide preloaders
-    await disableAnimationsAndPreloaders(newTab.id);
-    await sleep(500);
-    
     return await captureFullPage(newTab);
+
+
     
   } finally {
     if (windowId) {
@@ -773,62 +744,34 @@ async function captureResponsiveFullPage(url, viewport, delay = 3000) {
   }
 }
 
+
+
 // ============================================
 // Utilities
 // ============================================
 
-function waitForTabLoad(tabId, waitForResources = true) {
+function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
-    const checkComplete = async () => {
+    const timeout = setTimeout(() => resolve(false), 5000); // 5 sec max
+    
+    const check = async () => {
       try {
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === 'complete') {
-          if (waitForResources) {
-            // Additional check for document readyState and resources
-            try {
-              const [{ result }] = await chrome.scripting.executeScript({
-                target: { tabId },
-                func: () => {
-                  // Check if document is fully loaded
-                  if (document.readyState !== 'complete') return false;
-                  
-                  // Check if all images are loaded
-                  const images = document.querySelectorAll('img');
-                  for (const img of images) {
-                    if (!img.complete || img.naturalHeight === 0) return false;
-                  }
-                  
-                  return true;
-                }
-              });
-              if (result) {
-                resolve();
-                return;
-              }
-            } catch (e) {
-              // Script injection failed, resolve anyway
-              resolve();
-              return;
-            }
-          } else {
-            resolve();
-            return;
-          }
+          clearTimeout(timeout);
+          resolve(true);
+          return;
         }
+        setTimeout(check, 100); // Check every 100ms
       } catch (e) {
-        // Tab doesn't exist anymore
-        resolve();
-        return;
+        clearTimeout(timeout);
+        resolve(false);
       }
-      setTimeout(checkComplete, 200);
     };
-    
-    checkComplete();
-    
-    // Increased timeout to 20 seconds for slow-loading pages
-    setTimeout(resolve, 20000);
+    check();
   });
 }
+
 
 // Inject CSS to disable animations and hide preloaders
 async function disableAnimationsAndPreloaders(tabId) {
@@ -896,7 +839,34 @@ async function disableAnimationsAndPreloaders(tabId) {
   }
 }
 
+// Crop image to exact dimensions using OffscreenCanvas
+async function cropImage(dataUrl, targetWidth, targetHeight) {
+  try {
+    const response = await fetch(dataUrl);
+    const blob = await response.blob();
+    const bitmap = await createImageBitmap(blob);
+    
+    const canvas = new OffscreenCanvas(targetWidth, targetHeight);
+    const ctx = canvas.getContext('2d');
+    
+    // Draw the image, cropping to top-left corner
+    ctx.drawImage(bitmap, 0, 0, targetWidth, targetHeight, 0, 0, targetWidth, targetHeight);
+    
+    const croppedBlob = await canvas.convertToBlob({ type: 'image/png' });
+    return new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(croppedBlob);
+    });
+  } catch (error) {
+    console.error('[DevShot] Crop error:', error);
+    return dataUrl; // Return original on error
+  }
+}
+
 async function stitchImages(captures, dimensions) {
+
   const { scrollWidth, scrollHeight, viewportHeight, devicePixelRatio } = dimensions;
   
   console.log('[DevShot] Stitching', captures.length, 'captures');

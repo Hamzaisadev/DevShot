@@ -37,8 +37,9 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   function getDelay() {
-    return parseInt(delaySelect.value) || 3000;
+    return parseInt(delaySelect.value) || 1000;
   }
+
 
   function showStatus(msg, type = 'loading') {
     statusEl.textContent = msg;
@@ -59,6 +60,9 @@ document.addEventListener('DOMContentLoaded', () => {
     if (busy) return;
     setDisabled(true);
     
+    // Add loading spinner to the clicked button
+    btn.classList.add('btn-loading');
+    
     const delay = getDelay();
     showStatus(delay > 0 ? `Waiting ${delay/1000}s...` : 'Capturing...', 'loading');
     
@@ -69,12 +73,15 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('Error: ' + e.message, 'error');
     }
     
+    btn.classList.remove('btn-loading');
     setDisabled(false);
   }
+
 
   async function captureAll() {
     if (busy) return;
     setDisabled(true);
+    btns.bundle.classList.add('btn-loading');
     
     const types = ['desktop-viewport', 'desktop-fullpage', 'mobile-viewport', 'mobile-fullpage', 'tablet-viewport', 'tablet-fullpage'];
     const delay = getDelay();
@@ -89,9 +96,11 @@ document.addEventListener('DOMContentLoaded', () => {
       if (i < types.length - 1) await new Promise(r => setTimeout(r, 800));
     }
     
+    btns.bundle.classList.remove('btn-loading');
     showStatus('✓ All 6 saved!', 'success');
     setDisabled(false);
   }
+
 
   // Batch URLs Modal
   function showBatchModal() {

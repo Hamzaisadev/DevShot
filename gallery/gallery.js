@@ -13,6 +13,7 @@ document.addEventListener('DOMContentLoaded', () => {
   const customCanvasBtn = document.getElementById('btn-custom-canvas');
   const exportPdfBtn = document.getElementById('btn-export-pdf');
   const downloadAllBtn = document.getElementById('btn-download-all');
+  const clearAllBtn = document.getElementById('btn-clear-all');
   const refreshBtn = document.getElementById('btn-refresh');
   const filterDomain = document.getElementById('filter-domain');
   const filterType = document.getElementById('filter-type');
@@ -28,6 +29,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // Event listeners
   refreshBtn.addEventListener('click', loadScreenshots);
   downloadAllBtn.addEventListener('click', downloadAll);
+  clearAllBtn.addEventListener('click', clearAll);
+  
+  // Refresh when window regains focus to show new captures
+  window.addEventListener('focus', loadScreenshots);
   selectAllCheckbox.addEventListener('change', toggleSelectAll);
   deleteSelectedBtn.addEventListener('click', deleteSelected);
   downloadSelectedBtn.addEventListener('click', downloadSelected);
@@ -42,13 +47,24 @@ document.addEventListener('DOMContentLoaded', () => {
   // Load screenshots from IndexedDB
   async function loadScreenshots() {
     try {
-      screenshots = await db.getAll();
+      if (!db) throw new Error('Database not initialized');
+      screenshots = await db.getAll() || [];
       updateDomainFilter();
       renderGallery();
     } catch (error) {
       console.error('Failed to load screenshots:', error);
       screenshots = [];
-      renderGallery();
+      if (emptyState) {
+        emptyState.style.display = 'flex';
+        emptyState.innerHTML = `
+          <div style="text-align:center; color: #ef4444;">
+            <p style="font-size: 2rem;">⚠️</p>
+            <p>Failed to load gallery</p>
+            <p style="font-size: 0.8rem; opacity: 0.7;">${error.message}</p>
+            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer;">Retry</button>
+          </div>
+        `;
+      }
     }
   }
 
@@ -114,6 +130,7 @@ document.addEventListener('DOMContentLoaded', () => {
         <span class="domain-icon">📁</span>
         <span class="domain-name">${domain}</span>
         <span class="domain-count">${domainScreenshots.length} screenshots</span>
+        <button class="btn btn-sm btn-secondary domain-download-zip-btn" title="Download All as ZIP">📦 ZIP</button>
         <button class="btn btn-sm btn-primary domain-showcase-btn" title="Create Showcase">🖼️ Showcase</button>
         <span class="domain-toggle">▼</span>
       </div>
@@ -123,6 +140,13 @@ document.addEventListener('DOMContentLoaded', () => {
     const header = group.querySelector('.domain-header');
     const grid = group.querySelector('.screenshot-grid');
     const showcaseBtn = header.querySelector('.domain-showcase-btn');
+    const zipBtn = header.querySelector('.domain-download-zip-btn');
+
+    // Download all as ZIP
+    zipBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      await downloadDomainAsZip(domain, domainScreenshots, zipBtn);
+    });
 
     // Open showcase modal for this domain
     showcaseBtn.addEventListener('click', (e) => {
@@ -133,7 +157,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Toggle collapse
     header.addEventListener('click', (e) => {
-      if (e.target.classList.contains('domain-showcase-btn')) return;
+      if (e.target.classList.contains('domain-showcase-btn') || e.target.classList.contains('domain-download-zip-btn')) return;
       header.classList.toggle('collapsed');
       grid.style.display = header.classList.contains('collapsed') ? 'none' : 'grid';
     });
@@ -164,11 +188,19 @@ document.addEventListener('DOMContentLoaded', () => {
     
     card.innerHTML = `
       <input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''}>
-      ${isVideo ? `
-        <video class="card-image card-video" src="${screenshot.dataUrl}" muted loop></video>
-      ` : `
-        <img class="card-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}">
-      `}
+      <div class="screenshot-preview">
+        ${isVideo ? `
+          <video class="card-image card-video" src="${screenshot.dataUrl}" muted loop></video>
+        ` : `
+          <img class="card-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}" loading="lazy">
+        `}
+        <div class="screenshot-overlay">
+          <button class="btn btn-icon btn-view" title="View Full">👁️</button>
+          <button class="btn btn-icon btn-mockup" title="Device Mockup">📱</button>
+          <button class="btn btn-icon btn-download" title="Download">📥</button>
+          <button class="btn btn-icon btn-delete" title="Delete">🗑️</button>
+        </div>
+      </div>
       <div class="card-info">
         <div class="card-filename">${screenshot.filename}</div>
         <div class="card-meta">
@@ -176,69 +208,76 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="card-badge ${screenshot.captureType}">${screenshot.captureType}</span>
         </div>
         <div class="card-date">${formatDate(screenshot.timestamp)}</div>
-      </div>
-      <div class="card-actions">
-        ${showMockup && !isVideo ? `<button class="btn btn-sm btn-secondary btn-mockup" title="Add Device Frame">📱 Mockup</button>` : ''}
-        ${isVideo ? `<button class="btn btn-sm btn-primary btn-play" title="Play Video">▶️</button>` : ''}
-        <button class="btn btn-sm btn-secondary btn-download" title="Download">
-          📥
-        </button>
-        <button class="btn btn-sm btn-danger btn-delete" title="Delete">
-          🗑️
-        </button>
+        ${isVideo ? `<div class="card-video-label">🎥 Video Capture</div>` : ''}
       </div>
     `;
 
     // Event listeners
     const checkbox = card.querySelector('.card-checkbox');
-    const image = card.querySelector('.card-image');
+    const imagePreview = card.querySelector('.screenshot-preview');
+    const viewBtn = card.querySelector('.btn-view');
     const mockupBtn = card.querySelector('.btn-mockup');
     const downloadBtn = card.querySelector('.btn-download');
     const deleteBtn = card.querySelector('.btn-delete');
+    const infoArea = card.querySelector('.card-info');
 
     checkbox.addEventListener('change', (e) => {
       e.stopPropagation();
       toggleSelect(screenshot.id, checkbox.checked);
     });
 
-    // Click handler - open preview for both images and videos
-    image.addEventListener('click', () => {
+    // Toggle selection by clicking info area
+    infoArea.addEventListener('click', (e) => {
+      e.stopPropagation();
+      toggleSelection(screenshot.id);
+    });
+
+    // Overlay Action: View
+    viewBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
       openPreview(screenshot);
     });
 
-    // Only add mockup listener if button exists
-    if (mockupBtn) {
+    // Overlay Action: Mockup
+    if (isVideo) {
+      mockupBtn.style.display = 'none';
+    } else {
       mockupBtn.addEventListener('click', (e) => {
         e.stopPropagation();
         openMockupModal(screenshot);
       });
     }
 
-    // Play video button
-    const playBtn = card.querySelector('.btn-play');
-    const videoEl = card.querySelector('.card-video');
-    if (playBtn && videoEl) {
-      playBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        if (videoEl.paused) {
-          videoEl.play();
-          playBtn.textContent = '⏸️';
-        } else {
-          videoEl.pause();
-          playBtn.textContent = '▶️';
-        }
-      });
-    }
-
+    // Overlay Action: Download
     downloadBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       downloadScreenshot(screenshot);
     });
 
-    deleteBtn.addEventListener('click', (e) => {
+    // Overlay Action: Delete
+    deleteBtn.addEventListener('click', async (e) => {
       e.stopPropagation();
-      deleteScreenshot(screenshot.id);
+      if (confirm('Delete this screenshot?')) {
+        await db.delete(screenshot.id);
+        loadScreenshots();
+      }
     });
+
+    // Video play/pause on click
+    if (isVideo) {
+      const videoEl = card.querySelector('.card-video');
+      imagePreview.addEventListener('click', (e) => {
+        if (e.target.closest('.btn-icon')) return; // Let buttons work
+        e.stopPropagation();
+        if (videoEl.paused) {
+          videoEl.play();
+        } else {
+          videoEl.pause();
+        }
+      });
+    }
+
+    // Note: Duplicate event listeners removed - they were already added above
 
     return card;
   }
@@ -308,6 +347,15 @@ document.addEventListener('DOMContentLoaded', () => {
       await db.delete(id);
     }
     screenshots = screenshots.filter(s => !selectedIds.has(s.id));
+    selectedIds.clear();
+    renderGallery();
+  }
+
+  async function clearAll() {
+    if (!confirm('Are you sure you want to delete ALL screenshots? This cannot be undone.')) return;
+    
+    await db.clear();
+    screenshots = [];
     selectedIds.clear();
     renderGallery();
   }
@@ -434,17 +482,36 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 1, defaultDevice: 'ipad-pro-11', label: 'Left (Tablet)' }, 
         { id: 2, defaultDevice: 'iphone-15-pro', label: 'Right (Phone)' }
       ]},
-      { id: 'side-by-side', name: 'Side by Side', icon: '⏸', slots: [
-        { id: 0, defaultDevice: 'browser-arc', label: 'Left' },
-        { id: 1, defaultDevice: 'browser-arc', label: 'Right' }
+      { id: 'hero-layout', name: 'Hero Shot', icon: '💎', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Main Feature' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Floating Mobile' }
       ]},
-      { id: 'comparison', name: 'Comparison', icon: 'VS', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-14', label: 'Before/Left' },
-        { id: 1, defaultDevice: 'macbook-pro-14', label: 'After/Right' }
+      { id: 'isometric-floating', name: 'Isometric Float', icon: '🔷', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Main (Tilted)' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Floating Phone' }
       ]},
-      { id: 'grid-4', name: 'Grid 2x2', icon: '田', slots: [0,1,2,3].map(i => ({ id: i, defaultDevice: 'browser-light', label: `Screen ${i+1}` })) },
+      { id: 'marketing-stack', name: 'Marketing Stack', icon: '📚', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Back Layer' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Front Device' }
+      ]},
+      { id: 'browser-comparison', name: 'Browser Compare', icon: '⚖️', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Left Browser' },
+        { id: 1, defaultDevice: 'browser-light', label: 'Right Browser' }
+      ]},
+      { id: 'business-angled', name: 'Angled Overlap', icon: '📐', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Back' },
+        { id: 1, defaultDevice: 'browser-light', label: 'Middle' },
+        { id: 2, defaultDevice: 'browser-light', label: 'Front' }
+      ]},
+      { id: 'floating-devices', name: 'Floating Trio', icon: '☁️', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-14', label: 'Laptop' },
+        { id: 1, defaultDevice: 'ipad-air', label: 'Tablet' },
+        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone' }
+      ]},
+      { id: 'bold-color-grid', name: 'Color Grid', icon: '⬛', slots: [0, 1, 2, 3].map(i => ({ id: i, defaultDevice: 'none', label: `Screen ${i+1}` })) },
       { id: 'custom', name: 'Custom Canvas', icon: '🎨', slots: [] }
     ];
+
 
     const DEVICE_TYPES = [
       { id: 'none', name: 'No Frame', icon: '🖼️' },
@@ -467,13 +534,21 @@ document.addEventListener('DOMContentLoaded', () => {
       { id: 'browser-light', name: 'Browser (Light)', icon: '🌐' }
     ];
 
-    // Slot Configuration
+    // Slot Configuration - Per template to avoid cross-template contamination
     const slotConfig = {};
+    const getSlotConfigKey = (templateId, slotId) => `${templateId}-${slotId}`;
+    
+    // Initialize slot configs per template
     TEMPLATES.forEach(t => {
       t.slots.forEach(s => {
-        if (!slotConfig[s.id]) slotConfig[s.id] = s.defaultDevice;
+        const key = getSlotConfigKey(t.id, s.id);
+        if (!slotConfig[key]) slotConfig[key] = s.defaultDevice;
       });
     });
+    
+    // Helper to get/set current template's slot config
+    const getSlotDevice = (slotId) => slotConfig[getSlotConfigKey(state.template, slotId)] || 'none';
+    const setSlotDevice = (slotId, deviceId) => { slotConfig[getSlotConfigKey(state.template, slotId)] = deviceId; };
 
     // Modal UI
     const overlay = document.createElement('div');
@@ -535,7 +610,7 @@ document.addEventListener('DOMContentLoaded', () => {
             <div style="display:grid;grid-template-columns:repeat(5, 1fr);gap:8px;">
                ${getBackgroundOptions().map(bg => `
                  <button class="bg-option" data-type="${bg.type}" data-val="${bg.value}" title="${bg.name}"
-                   style="width:100%;aspect-ratio:1;border-radius:8px;border:2px solid transparent;cursor:pointer;background:${bg.css};position:relative;overflow:hiddenbox-shadow:0 2px 4px rgba(0,0,0,0.2);"></button>
+                   style="width:100%;aspect-ratio:1;border-radius:8px;border:2px solid transparent;cursor:pointer;background:${bg.css};position:relative;overflow:hidden;box-shadow:0 2px 4px rgba(0,0,0,0.2);"></button>
                `).join('')}
                <input type="color" id="custom-color-picker" style="width:100%;height:100%;padding:0;border:none;border-radius:8px;cursor:pointer;">
             </div>
@@ -573,7 +648,12 @@ document.addEventListener('DOMContentLoaded', () => {
     canvas.height = 1080;
 
     // Render Slots UI
-    function renderSlotsUI() {
+    function updateUI() {
+      // Show/hide custom tools
+      const customHint = overlay.querySelector('#custom-hint');
+      if (customHint) customHint.style.display = state.template === 'custom' ? 'block' : 'none';
+      
+      const slotsContainer = overlay.querySelector('.slots-container');
       const list = overlay.querySelector('#slots-list');
       const currentTpl = TEMPLATES.find(t => t.id === state.template);
       
@@ -582,13 +662,19 @@ document.addEventListener('DOMContentLoaded', () => {
         list.innerHTML = `
           <div style="background:rgba(255,255,255,0.05);border-radius:8px;padding:16px;text-align:center;">
             <p style="color:rgba(255,255,255,0.6);font-size:0.9rem;">Custom Mode</p>
-            <button id="add-item-btn" style="background:#6366f1;color:white;border:none;padding:8px 16px;border-radius:6px;cursor:pointer;margin-top:8px;">+ Add Random Screenshot</button>
+            <button id="add-item-btn" style="background:#6366f1;color:white;border:none;padding:10px 16px;border-radius:8px;cursor:pointer;margin-top:8px;font-weight:600;width:100%;">
+              + Add Screenshot
+            </button>
           </div>
           ${state.selectedItem ? `
             <div style="margin-top:20px;border-top:1px solid rgba(255,255,255,0.1);padding-top:20px;">
-              <label style="display:block;color:rgba(255,255,255,0.6);font-size:0.75rem;margin-bottom:8px;">SELECTED ITEM DEVICE</label>
+              <label style="display:block;color:rgba(255,255,255,0.6);font-size:0.75rem;margin-bottom:8px;">SELECTED ITEM</label>
               ${renderDeviceSelector(state.selectedItem.deviceId, 'custom-device')}
-               <button id="delete-item-btn" style="width:100%;margin-top:10px;background:#ef4444;color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;">Remove Item</button>
+              <div style="display:flex;gap:8px;margin-top:10px;">
+                <button id="bring-front" style="flex:1;background:rgba(255,255,255,0.1);color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;">⬆ Front</button>
+                <button id="send-back" style="flex:1;background:rgba(255,255,255,0.1);color:white;border:none;padding:8px;border-radius:6px;cursor:pointer;">⬇ Back</button>
+              </div>
+              <button id="delete-item-btn" style="width:100%;margin-top:10px;background:rgba(239,68,68,0.2);color:#ef4444;border:1px solid rgba(239,68,68,0.3);padding:8px;border-radius:6px;cursor:pointer;">Remove Item</button>
             </div>
           ` : ''}
         `;
@@ -596,16 +682,15 @@ document.addEventListener('DOMContentLoaded', () => {
         // Custom events
         const addBtn = list.querySelector('#add-item-btn');
         if(addBtn) addBtn.onclick = () => {
-           if(state.available.length > 0) {
-             const randomS = state.available[Math.floor(Math.random() * state.available.length)];
+           openImageSelector((selectedScreenshot) => {
              state.customItems.push({
                 id: Date.now(),
-                img: randomS,
-                x: 960, y: 540, w: 600,
-                deviceId: randomS.device === 'mobile' ? 'iphone-15-pro' : 'macbook-pro-16'
+                img: selectedScreenshot,
+                x: 960, y: 540, w: 800,
+                deviceId: selectedScreenshot.device === 'mobile' ? 'iphone-15-pro' : 'macbook-pro-16'
              });
              render();
-           }
+           });
         };
         
         const devSel = list.querySelector('#custom-device');
@@ -616,12 +701,32 @@ document.addEventListener('DOMContentLoaded', () => {
            }
         };
 
+        const frontBtn = list.querySelector('#bring-front');
+        if(frontBtn) frontBtn.onclick = () => {
+          if(state.selectedItem) {
+             const idx = state.customItems.indexOf(state.selectedItem);
+             state.customItems.splice(idx, 1);
+             state.customItems.push(state.selectedItem);
+             render();
+          }
+        };
+
+        const backBtn = list.querySelector('#send-back');
+        if(backBtn) backBtn.onclick = () => {
+          if(state.selectedItem) {
+             const idx = state.customItems.indexOf(state.selectedItem);
+             state.customItems.splice(idx, 1);
+             state.customItems.unshift(state.selectedItem);
+             render();
+          }
+        };
+
         const delBtn = list.querySelector('#delete-item-btn');
         if(delBtn) delBtn.onclick = () => {
           if(state.selectedItem) {
             state.customItems = state.customItems.filter(i => i !== state.selectedItem);
             state.selectedItem = null;
-            renderSlotsUI();
+            updateUI();
             render();
           }
         };
@@ -631,7 +736,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
       list.innerHTML = currentTpl.slots.map(slot => {
         const assigned = state.assignments[slot.id];
-        const currentDeviceId = slotConfig[slot.id] || slot.defaultDevice;
+        const currentDeviceId = getSlotDevice(slot.id) || slot.defaultDevice;
         
         return `
           <div class="slot-item" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:12px;padding:16px;">
@@ -640,17 +745,25 @@ document.addEventListener('DOMContentLoaded', () => {
               <span style="font-size:1.2rem;">${DEVICE_TYPES.find(d => d.id === currentDeviceId)?.icon || '📱'}</span>
             </div>
             
-            <!-- Screenshot Selector -->
-            <div style="margin-bottom:12px;">
-              <label style="display:block;font-size:0.7rem;color:rgba(255,255,255,0.4);margin-bottom:4px;">Content</label>
-              <select class="sc-select" data-slot="${slot.id}" style="width:100%;max-width:100%;background:#111;border:1px solid rgba(255,255,255,0.1);color:white;padding:8px;border-radius:6px;font-size:0.85rem;text-overflow:ellipsis;">
-                <option value="">(Empty)</option>
-                ${state.available.map(s => `
-                  <option value="${s.id}" ${assigned && assigned.id === s.id ? 'selected' : ''}>
-                    ${s.domain} - ${formatDate(s.timestamp)}
-                  </option>
-                `).join('')}
-              </select>
+            <!-- VISUAL PICKER BUTTON -->
+            <div class="visual-picker-btn" data-slot="${slot.id}" style="
+               height: 100px; 
+               background: ${assigned ? `url(${assigned.dataUrl})` : 'rgba(0,0,0,0.3)'};
+               background-size: cover;
+               background-position: center top;
+               border: 2px dashed rgba(255,255,255,0.1);
+               border-radius: 8px;
+               cursor: pointer;
+               display: flex; align-items: center; justify-content: center;
+               margin-bottom: 12px;
+               position: relative;
+               transition: all 0.2s;
+            ">
+               ${!assigned ? `<span style="color:rgba(255,255,255,0.4); font-size: 0.8rem;">+ Select Image</span>` : 
+                 `<div style="position:absolute;inset:0;background:rgba(0,0,0,0.5);display:flex;align-items:center;justify-content:center;opacity:0;transition:opacity 0.2s;" onmouseenter="this.style.opacity=1" onmouseleave="this.style.opacity=0">
+                    <span style="color:white;font-weight:600;font-size:0.85rem;">Change</span>
+                  </div>`
+               }
             </div>
 
             <!-- Device Selector -->
@@ -663,37 +776,99 @@ document.addEventListener('DOMContentLoaded', () => {
       }).join('');
 
       // Attach Listeners
-      list.querySelectorAll('.sc-select').forEach(sel => {
-        sel.onchange = (e) => {
-          const slotId = parseInt(e.target.dataset.slot);
-          const sId = parseInt(e.target.value);
-          const s = state.available.find(x => x.id === sId);
-          if (s) {
-            state.assignments[slotId] = s;
-          } else {
-            delete state.assignments[slotId];
-          }
-          render();
+      list.querySelectorAll('.visual-picker-btn').forEach(btn => {
+        btn.onclick = () => {
+          const slotId = parseInt(btn.dataset.slot);
+          openImageSelector((selectedScreenshot) => {
+            state.assignments[slotId] = selectedScreenshot;
+            render();
+            updateUI();
+          });
         };
       });
 
       list.querySelectorAll('select[id^="device-slot"]').forEach(sel => {
         sel.onchange = (e) => {
           const slotId = parseInt(e.target.dataset.slot);
-          slotConfig[slotId] = e.target.value;
+          setSlotDevice(slotId, e.target.value);
           render();
-          renderSlotsUI(); // Re-render to update icon
+          updateUI(); // Re-render to update icon
         };
       });
     }
 
+    // VISUAL IMAGE SELECTOR MODAL (Smart Selection)
+    function openImageSelector(onSelect, slotType = 'any') {
+      // Get IDs of already-assigned screenshots
+      const assignedIds = new Set(Object.values(state.assignments).filter(Boolean).map(s => s.id));
+      state.customItems.forEach(item => { if(item.img) assignedIds.add(item.img.id); });
+      
+      // Filter and sort: unassigned first, then assigned (grayed out)
+      const unassigned = state.available.filter(s => !assignedIds.has(s.id));
+      const assigned = state.available.filter(s => assignedIds.has(s.id));
+      const sortedScreenshots = [...unassigned, ...assigned];
+
+      const subOverlay = document.createElement('div');
+      subOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);backdrop-filter:blur(10px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:40px;';
+      
+      subOverlay.innerHTML = `
+        <div style="width:100%;max-width:900px;background:#16161a;border-radius:20px;padding:30px;display:flex;flex-direction:column;max-height:85vh;border:1px solid rgba(255,255,255,0.1);">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:24px;">
+            <h2 style="margin:0;color:white;font-size:1.4rem;">Select Screenshot</h2>
+            <button id="close-selector" style="background:none;border:none;color:white;font-size:2rem;cursor:pointer;">&times;</button>
+          </div>
+          <div style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(180px, 1fr));gap:16px;">
+            ${sortedScreenshots.map(s => {
+              const isAssigned = assignedIds.has(s.id);
+              return `
+              <div class="picker-thumb ${isAssigned ? 'assigned' : ''}" data-id="${s.id}" style="border-radius:12px;overflow:hidden;background:#000;aspect-ratio:4/3;cursor:${isAssigned ? 'not-allowed' : 'pointer'};border:2px solid transparent;transition:all 0.2s;position:relative;opacity:${isAssigned ? '0.4' : '1'};">
+                <img src="${s.dataUrl}" style="width:100%;height:100%;object-fit:cover;object-position:top;">
+                <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent, rgba(0,0,0,0.8));padding:8px;font-size:0.75rem;color:white;">
+                  ${s.domain}
+                </div>
+                ${isAssigned ? `<div style="position:absolute;top:8px;right:8px;background:#ef4444;color:white;padding:2px 8px;border-radius:4px;font-size:0.65rem;font-weight:600;">IN USE</div>` : ''}
+              </div>
+            `}).join('')}
+          </div>
+        </div>
+      `;
+      
+      subOverlay.onclick = (e) => { if(e.target === subOverlay || e.target.id === 'close-selector') subOverlay.remove(); };
+      
+      subOverlay.querySelectorAll('.picker-thumb:not(.assigned)').forEach(thumb => {
+        thumb.onmouseenter = () => thumb.style.borderColor = '#6366f1';
+        thumb.onmouseleave = () => thumb.style.borderColor = 'transparent';
+        thumb.onclick = () => {
+          const id = parseInt(thumb.dataset.id);
+          const s = state.available.find(x => x.id === id);
+          onSelect(s);
+          subOverlay.remove();
+        };
+      });
+      
+      document.body.appendChild(subOverlay);
+    }
+
+
     function renderDeviceSelector(currentValue, id, dataSlot = '') {
+      // Build options with proper optgroup structure
+      let optionsHtml = '';
+      let currentOptGroup = null;
+      
+      DEVICE_TYPES.forEach(d => {
+        if (d.type === 'header') {
+          if (currentOptGroup) optionsHtml += '</optgroup>';
+          optionsHtml += `<optgroup label="${d.name}">`;
+          currentOptGroup = d.name;
+        } else {
+          optionsHtml += `<option value="${d.id}" ${d.id === currentValue ? 'selected' : ''}>${d.icon} ${d.name}</option>`;
+        }
+      });
+      if (currentOptGroup) optionsHtml += '</optgroup>';
+      
       return `
         <select id="${id}" ${dataSlot !== '' ? `data-slot="${dataSlot}"` : ''} style="width:100%;background:#111;border:1px solid rgba(255,255,255,0.1);color:white;padding:8px;border-radius:6px;font-size:0.85rem;">
-          ${DEVICE_TYPES.map(d => {
-            if (d.type === 'header') return `<optgroup label="${d.name}"></optgroup>`;
-            return `<option value="${d.id}" ${d.id === currentValue ? 'selected' : ''}>${d.icon} ${d.name}</option>`;
-          }).join('')}
+          ${optionsHtml}
         </select>
       `;
     }
@@ -721,21 +896,43 @@ document.addEventListener('DOMContentLoaded', () => {
 
       // Custom Mode
       if (state.template === 'custom') {
-        overlay.querySelector('#custom-hint').style.display = 'block';
         for (let item of state.customItems) {
            const img = await loadImg(item.img);
            if(img) {
              drawDevice(ctx, item.deviceId, img, item.x, item.y, item.w);
              if(state.selectedItem === item) {
+               // Draw selection outline
+               const isPhone = item.deviceId.includes('phone') || item.deviceId.includes('pixel') || item.deviceId.includes('samsung');
+               const h = isPhone ? item.w * 2 : item.w * 0.65;
+               const hw = item.w / 2, hh = h / 2;
+               
                ctx.strokeStyle = '#6366f1';
-               ctx.lineWidth = 4;
-               ctx.strokeRect(item.x - item.w/2 - 10, item.y - (item.deviceId.includes('phone')? item.w*2 : item.w*0.65)/2 - 10, item.w+20, (item.deviceId.includes('phone')? item.w*2 : item.w*0.65)+20); // Rough box
+               ctx.lineWidth = 3;
+               ctx.setLineDash([8, 4]);
+               ctx.strokeRect(item.x - hw, item.y - hh, item.w, h);
+               ctx.setLineDash([]);
+               
+               // Draw 8-point handles
+               const handles = [
+                 { x: item.x - hw, y: item.y - hh }, { x: item.x, y: item.y - hh }, { x: item.x + hw, y: item.y - hh },
+                 { x: item.x + hw, y: item.y }, { x: item.x + hw, y: item.y + hh }, { x: item.x, y: item.y + hh },
+                 { x: item.x - hw, y: item.y + hh }, { x: item.x - hw, y: item.y }
+               ];
+               handles.forEach(handle => {
+                 ctx.fillStyle = '#ffffff';
+                 ctx.strokeStyle = '#6366f1';
+                 ctx.lineWidth = 2;
+                 ctx.beginPath();
+                 ctx.arc(handle.x, handle.y, 8, 0, Math.PI * 2);
+                 ctx.fill();
+                 ctx.stroke();
+               });
              }
            }
         }
         return;
       }
-      overlay.querySelector('#custom-hint').style.display = 'none';
+
 
       // Templates
       const t = TEMPLATES.find(x => x.id === state.template);
@@ -749,49 +946,177 @@ document.addEventListener('DOMContentLoaded', () => {
       }
 
       if (state.template === 'single-device') {
-        if(loaded[0]) drawDevice(ctx, slotConfig[0], loaded[0], 960, 540, 900);
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 900);
       }
       else if (state.template === '3-device') {
-        // Desktop Center, Tablet Left, Phone Right
-        if(loaded[0]) drawDevice(ctx, slotConfig[0], loaded[0], 960, 500, 1000);
-        if(loaded[1]) drawDevice(ctx, slotConfig[1], loaded[1], 350, 650, 450);
-        if(loaded[2]) drawDevice(ctx, slotConfig[2], loaded[2], 1600, 680, 240);
+        // Center, Left, Right
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 460, 600, 520);
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1460, 600, 520);
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 500, 1000);
       }
-      else if (state.template === 'side-by-side') {
-        if(loaded[0]) drawDevice(ctx, slotConfig[0], loaded[0], 500, 540, 800);
-        if(loaded[1]) drawDevice(ctx, slotConfig[1], loaded[1], 1420, 540, 800);
+      else if (state.template === 'hero-layout') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 850, 500, 1100);
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1450, 680, 280);
       }
-      else if (state.template === 'comparison') {
-        if(loaded[0]) drawDevice(ctx, slotConfig[0], loaded[0], 540, 540, 900);
-        if(loaded[1]) drawDevice(ctx, slotConfig[1], loaded[1], 1380, 540, 900);
+      // NEW: Isometric Floating (3D Tilt Effect)
+      else if (state.template === 'isometric-floating') {
+        ctx.save();
+        // Main device with isometric transform
+        if(loaded[0]) {
+          ctx.translate(700, 450);
+          ctx.transform(1, 0.1, -0.2, 1, 0, 0); // Skew for isometric
+          drawDevice(ctx, getSlotDevice(0), loaded[0], 0, 0, 1000);
+        }
+        ctx.restore();
+        // Floating phone
+        if(loaded[1]) {
+          ctx.save();
+          ctx.translate(1400, 600);
+          ctx.transform(1, -0.05, 0.1, 1, 0, 0);
+          drawDevice(ctx, getSlotDevice(1), loaded[1], 0, 0, 280);
+          ctx.restore();
+        }
       }
-      else if (state.template === 'grid-4') {
-        if(loaded[0]) drawDevice(ctx, slotConfig[0], loaded[0], 480, 270, 800);
-        if(loaded[1]) drawDevice(ctx, slotConfig[1], loaded[1], 1440, 270, 800);
-        if(loaded[2]) drawDevice(ctx, slotConfig[2], loaded[2], 480, 810, 800);
-        if(loaded[3]) drawDevice(ctx, slotConfig[3], loaded[3], 1440, 810, 800); // 4th
+      // NEW: Marketing Stack (Depth Overlap)
+      else if (state.template === 'marketing-stack') {
+        // Back layer (browser/desktop)
+        if(loaded[0]) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.4)';
+          ctx.shadowBlur = 50;
+          ctx.shadowOffsetY = 30;
+          drawDevice(ctx, getSlotDevice(0), loaded[0], 800, 500, 1000);
+          ctx.restore();
+        }
+        // Front device (phone)
+        if(loaded[1]) {
+          ctx.save();
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 60;
+          ctx.shadowOffsetY = 40;
+          drawDevice(ctx, getSlotDevice(1), loaded[1], 1400, 580, 320);
+          ctx.restore();
+        }
+      }
+      // NEW: Browser Comparison (Side-by-Side)
+      else if (state.template === 'browser-comparison') {
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 500, 540, 780);
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1420, 540, 780);
+        // Add comparison divider
+        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
+        ctx.lineWidth = 2;
+        ctx.beginPath();
+        ctx.moveTo(960, 100);
+        ctx.lineTo(960, 980);
+        ctx.stroke();
+      }
+
+      else if (state.template === 'business-angled') {
+        ctx.save();
+        // Angled transforms
+        const drawAngled = (slotId, x, y, w, rot) => {
+           if(!loaded[slotId]) return;
+           ctx.save();
+           ctx.translate(x, y);
+           ctx.rotate(rot * Math.PI / 180);
+           drawDevice(ctx, getSlotDevice(slotId), loaded[slotId], 0, 0, w);
+           ctx.restore();
+        };
+        drawAngled(0, 600, 450, 800, -10);
+        drawAngled(1, 960, 540, 800, -10);
+        drawAngled(2, 1320, 630, 800, -10);
+        ctx.restore();
+      }
+      else if (state.template === 'floating-devices') {
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 500, 540, 500);
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1500, 540, 280);
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 1000); // Main laptop on top
+      }
+      else if (state.template === 'bold-color-grid') {
+        const padding = 100;
+        const w = (1920 - padding*3) / 2;
+        const h = (1080 - padding*3) / 2;
+        
+        const drawGridItem = (slotId, x, y) => {
+          if(!loaded[slotId]) return;
+          ctx.strokeStyle = ['#6366f1', '#10b981', '#f59e0b', '#ef4444'][slotId];
+          ctx.lineWidth = 20;
+          ctx.strokeRect(x, y, w, h);
+          ctx.drawImage(loaded[slotId], x, y, w, h);
+        };
+        
+        drawGridItem(0, padding, padding);
+        drawGridItem(1, padding*2 + w, padding);
+        drawGridItem(2, padding, padding*2 + h);
+        drawGridItem(3, padding*2 + w, padding*2 + h);
       }
     }
 
     // --- Events ---
     overlay.querySelector('#close-modal').onclick = () => overlay.remove();
     
+    // Click overlay to close (but not inner content)
+    overlay.addEventListener('click', (e) => {
+      if (e.target === overlay) overlay.remove();
+    });
+    
+    // Keyboard shortcuts
+    const handleKeydown = (e) => {
+      if (e.key === 'Escape') {
+        overlay.remove();
+        document.removeEventListener('keydown', handleKeydown);
+      }
+      if (state.template === 'custom' && state.selectedItem) {
+        if (e.key === 'Delete' || e.key === 'Backspace') {
+          state.customItems = state.customItems.filter(i => i !== state.selectedItem);
+          state.selectedItem = null;
+          updateUI();
+          render();
+        }
+        // Arrow keys for nudging
+        const nudge = e.shiftKey ? 10 : 1;
+        if (e.key === 'ArrowUp') { state.selectedItem.y -= nudge; render(); }
+        if (e.key === 'ArrowDown') { state.selectedItem.y += nudge; render(); }
+        if (e.key === 'ArrowLeft') { state.selectedItem.x -= nudge; render(); }
+        if (e.key === 'ArrowRight') { state.selectedItem.x += nudge; render(); }
+      }
+    };
+    document.addEventListener('keydown', handleKeydown);
+    
     // Template Switch
     overlay.querySelectorAll('.tpl-btn').forEach(btn => {
       btn.onclick = () => {
         state.template = btn.dataset.id;
         state.selectedItem = null;
-        overlay.querySelectorAll('.tpl-btn').forEach(b => b.classList.remove('active'));
+        overlay.querySelectorAll('.tpl-btn').forEach(b => {
+          b.classList.remove('active');
+          b.style.background = 'transparent';
+          b.style.color = 'rgba(255,255,255,0.7)';
+        });
         btn.classList.add('active');
-        renderSlotsUI();
+        btn.style.background = 'rgba(99,102,241,0.2)';
+        btn.style.color = 'white';
+        updateUI();
         render();
       };
+      // Set initial active state styling
+      if (btn.classList.contains('active')) {
+        btn.style.background = 'rgba(99,102,241,0.2)';
+        btn.style.color = 'white';
+      }
     });
 
-    // Background Switch
-    overlay.querySelectorAll('.bg-option').forEach(btn => {
+    // Background Switch - Fix gradient split and add initial active state
+    overlay.querySelectorAll('.bg-option').forEach((btn, index) => {
+      // Set initial active state for first background
+      if (index === 0) btn.style.borderColor = 'white';
+      
       btn.onclick = () => {
-        state.background = { type: btn.dataset.type, value: btn.dataset.val.includes(',') ? btn.dataset.val.split(',') : btn.dataset.val };
+        const val = btn.dataset.val;
+        state.background = { 
+          type: btn.dataset.type, 
+          value: val.includes(',') ? val.split(',').map(v => v.trim()) : val 
+        };
         overlay.querySelectorAll('.bg-option').forEach(b => b.style.borderColor = 'transparent');
         btn.style.borderColor = 'white';
         render();
@@ -820,159 +1145,275 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     updateZoom(); // Init
 
-    // Download
-    overlay.querySelector('#download-btn').onclick = () => {
+    // Download Image
+    overlay.querySelector('#download-btn').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const originalContent = btn.innerHTML;
+      
+      try {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Processing...';
+        btn.style.opacity = '0.7';
+        
+        // Let UI update
+        await new Promise(r => setTimeout(r, 100));
+        
+        await exportAsImage();
+        
+        btn.innerHTML = '<span>✅</span> Saved!';
+        setTimeout(() => {
+          btn.innerHTML = originalContent;
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 2000);
+      } catch (err) {
+        console.error(err);
+        btn.innerHTML = '<span>❌</span> Error';
+        setTimeout(() => {
+          btn.innerHTML = originalContent;
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 2000);
+      }
+    });
+
+    function exportAsImage() {
       const link = document.createElement('a');
       link.download = `Showcase_${Date.now()}.png`;
       link.href = canvas.toDataURL('image/png');
       link.click();
-    };
+    }
 
-    // Custom Mode Canvas Interactions
+    // --- PROFESSIONAL INTERACTION ENGINE ---
     let isDragging = false;
-    let isResizing = false;
+    let activeHandle = null; 
     let startX = 0, startY = 0;
+    let initialX = 0, initialY = 0, initialW = 0;
+
+    function getMousePos(e) {
+      const rect = canvas.getBoundingClientRect();
+      // Account for CSS transform zoom
+      const scaleX = canvas.width / (rect.width / state.zoom);
+      const scaleY = canvas.height / (rect.height / state.zoom);
+      return { x: (e.clientX - rect.left) * scaleX / state.zoom, y: (e.clientY - rect.top) * scaleY / state.zoom };
+    }
+
+    function getItemHeight(item) {
+      const isPhone = item.deviceId.includes('phone') || item.deviceId.includes('pixel') || item.deviceId.includes('samsung');
+      return isPhone ? item.w * 2 : item.w * 0.65;
+    }
+
+    function getHandles(item) {
+      const h = getItemHeight(item);
+      const hw = item.w / 2, hh = h / 2;
+      return [
+        { x: item.x - hw, y: item.y - hh }, { x: item.x,      y: item.y - hh }, { x: item.x + hw, y: item.y - hh },
+        { x: item.x + hw, y: item.y },      { x: item.x + hw, y: item.y + hh }, { x: item.x,      y: item.y + hh },
+        { x: item.x - hw, y: item.y + hh }, { x: item.x - hw, y: item.y }
+      ];
+    }
 
     canvas.onmousedown = (e) => {
       if(state.template !== 'custom') return;
-      const rect = canvas.getBoundingClientRect();
-      // Calculate scale factor because CSS size != intrinsic size (1920x1080)
-      const scaleX = canvas.width / rect.width;
-      const scaleY = canvas.height / rect.height;
-      const x = (e.clientX - rect.left) * scaleX;
-      const y = (e.clientY - rect.top) * scaleY;
-      
-      // Check interactions
-      for (let i = state.customItems.length -1; i >= 0; i--) {
-        const item = state.customItems[i];
-        const half = item.w / 2;
-        // Simple hit box
-        if (x >= item.x - half && x <= item.x + half && y >= item.y - half && y <= item.y + half) {
-          state.selectedItem = item;
-          isDragging = true;
-          startX = x; startY = y;
-          renderSlotsUI();
-          render();
-          return;
+      const { x, y } = getMousePos(e);
+      if (state.selectedItem) {
+        const handles = getHandles(state.selectedItem);
+        for (let i = 0; i < handles.length; i++) {
+          if (Math.sqrt((x - handles[i].x)**2 + (y - handles[i].y)**2) < 15) {
+            activeHandle = i; startX = x; startY = y; initialW = state.selectedItem.w; return;
+          }
         }
       }
-      if(state.selectedItem) {
-        state.selectedItem = null;
-        renderSlotsUI();
+      for (let i = state.customItems.length - 1; i >= 0; i--) {
+        const item = state.customItems[i];
+        const h = getItemHeight(item), hw = item.w / 2, hh = h / 2;
+        if (x >= item.x - hw && x <= item.x + hw && y >= item.y - hh && y <= item.y + hh) {
+          state.selectedItem = item; isDragging = true; startX = x; startY = y;
+          initialX = item.x; initialY = item.y; updateUI(); render(); return;
+        }
+      }
+      state.selectedItem = null; updateUI(); render();
+    };
+
+    canvas.onmousemove = (e) => {
+      if(state.template !== 'custom') return;
+      const { x, y } = getMousePos(e);
+      if (activeHandle !== null && state.selectedItem) {
+        const dx = x - startX;
+        if (activeHandle === 4 || activeHandle === 2) state.selectedItem.w = Math.max(100, initialW + dx);
+        else if (activeHandle === 0 || activeHandle === 6) { state.selectedItem.w = Math.max(100, initialW - dx); state.selectedItem.x = initialX + dx/2; }
+        render();
+      } else if (isDragging && state.selectedItem) {
+        state.selectedItem.x = initialX + (x - startX);
+        state.selectedItem.y = initialY + (y - startY);
         render();
       }
     };
-    
-    canvas.onmousemove = (e) => {
-      if(state.template !== 'custom') return;
-      if(isDragging && state.selectedItem) {
-         const rect = canvas.getBoundingClientRect();
-         const scaleX = canvas.width / rect.width;
-         const scaleY = canvas.height / rect.height;
-         const x = (e.clientX - rect.left) * scaleX;
-         const y = (e.clientY - rect.top) * scaleY;
-         
-         state.selectedItem.x += (x - startX);
-         state.selectedItem.y += (y - startY);
-         startX = x; startY = y;
-         
-         render();
-      }
-    };
-    
-    canvas.onmouseup = () => isDragging = false;
-    canvas.onmouseleave = () => isDragging = false;
+
+    canvas.onmouseup = () => { isDragging = false; activeHandle = null; };
+    canvas.onmouseleave = () => { isDragging = false; activeHandle = null; };
+
 
     document.body.appendChild(overlay);
     
     // Initial Render
-    renderSlotsUI();
+    updateUI();
     render();
   }
 
   // --- Device Rendering Logic (Reused & Simplified) ---
   function drawDevice(ctx, deviceId, img, cx, cy, width) {
-     const isPhone = deviceId.includes('phone') || deviceId.includes('pixel') || deviceId.includes('samsung');
-     const isLaptop = deviceId.includes('macbook') || deviceId.includes('laptop');
-     
-     // Calculate Height
-     const aspectRatio = img.height / img.width;
-     let h = width * aspectRatio;
-     
-     // --- No Frame ---
-     if (deviceId === 'none') {
-        ctx.shadowColor = 'rgba(0,0,0,0.3)'; ctx.shadowBlur = 30; ctx.shadowOffsetY = 10;
-        ctx.drawImage(img, cx - width/2, cy - h/2, width, h);
-        ctx.shadowColor = 'transparent';
-        return;
-     }
+    const isPhone = deviceId.includes('phone') || deviceId.includes('pixel') || deviceId.includes('samsung');
+    const isLaptop = deviceId.includes('macbook') || deviceId.includes('laptop');
+    const isBrowser = deviceId.includes('browser');
+    
+    // Calculate Height
+    const aspectRatio = img.height / img.width;
+    let h = width * aspectRatio;
+    
+    // Shadow Helper
+    const applyShadow = (blur = 40, y = 20) => {
+      ctx.shadowColor = 'rgba(0,0,0,0.5)';
+      ctx.shadowBlur = blur;
+      ctx.shadowOffsetY = y;
+    };
 
-     // --- Laptop ---
-     if (isLaptop) {
-        // Force laptop aspect roughly (e.g. 16:10 + bezel)
-        h = width * 0.65; 
-        const bezel = 15;
-        // Lid
-        ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 20;
-        ctx.fillStyle = '#1c1c1e';
-        roundRect(ctx, cx - width/2, cy - h/2, width, h, 12);
-        ctx.fill(); ctx.shadowColor = 'transparent';
-        // Screen
-        ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2 - 10);
-        // Base
-        ctx.fillStyle = '#2c2c2e';
+    // --- No Frame ---
+    if (deviceId === 'none') {
+      ctx.save();
+      applyShadow(30, 10);
+      ctx.drawImage(img, cx - width/2, cy - h/2, width, h);
+      ctx.restore();
+      return;
+    }
+
+    // --- Browser ---
+    if (isBrowser) {
+      const barHeight = 40;
+      h = h + barHeight;
+      ctx.save();
+      applyShadow(50, 25);
+      
+      // Window Frame
+      ctx.fillStyle = deviceId === 'browser-light' ? '#ffffff' : '#1a1a1a';
+      roundRect(ctx, cx - width/2, cy - h/2, width, h, 12);
+      ctx.fill();
+      
+      // Top Bar
+      ctx.fillStyle = deviceId === 'browser-light' ? '#f1f3f4' : '#2d2e31';
+      roundRect(ctx, cx - width/2, cy - h/2, width, barHeight, {tl: 12, tr: 12, bl: 0, br: 0});
+      ctx.fill();
+      
+      // Dots
+      const dotColors = ['#ff5f56', '#ffbd2e', '#27c93f'];
+      dotColors.forEach((color, i) => {
+        ctx.fillStyle = color;
         ctx.beginPath();
-        ctx.moveTo(cx - width/2 + 20, cy + h/2);
-        ctx.lineTo(cx + width/2 - 20, cy + h/2);
-        ctx.lineTo(cx + width/2 + 30, cy + h/2 + 15);
-        ctx.lineTo(cx - width/2 - 30, cy + h/2 + 15);
+        ctx.arc(cx - width/2 + 20 + (i * 20), cy - h/2 + 20, 6, 0, Math.PI * 2);
         ctx.fill();
-     }
-     // --- Phone / Tablet ---
-     else if (isPhone) {
-        h = width * 2.16; // 19.5:9 aspect approx
-        const radius = 40;
-        const bezel = 12;
-        
-        ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 20;
-        ctx.fillStyle = '#1c1c1e';
-        roundRect(ctx, cx - width/2, cy - h/2, width, h, radius);
-        ctx.fill(); ctx.shadowColor = 'transparent';
-        
-        ctx.save();
-        roundRect(ctx, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2, radius - 5);
-        ctx.clip();
-        ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2);
-        ctx.restore();
-        
-        // Dynamic Island
-        ctx.fillStyle = 'black';
-        roundRect(ctx, cx - 40, cy - h/2 + 10, 80, 24, 12);
-        ctx.fill();
-     }
-     else { // Tablet or other
-        // Tablet usually 4:3
-        h = width * 1.33; 
-        const radius = 20;
-        const bezel = 18;
-         
-        ctx.shadowColor = 'rgba(0,0,0,0.4)'; ctx.shadowBlur = 40; ctx.shadowOffsetY = 20;
-        ctx.fillStyle = '#1c1c1e';
-        roundRect(ctx, cx - width/2, cy - h/2, width, h, radius);
-        ctx.fill(); ctx.shadowColor = 'transparent';
-         
-        ctx.save();
-        roundRect(ctx, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2, radius - 5);
-        ctx.clip();
-        ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2);
-        ctx.restore();
-     }
+      });
+      
+      // Image
+      ctx.drawImage(img, cx - width/2, cy - h/2 + barHeight, width, h - barHeight);
+      
+      // Border
+      ctx.strokeStyle = 'rgba(0,0,0,0.1)';
+      ctx.lineWidth = 1;
+      roundRect(ctx, cx - width/2, cy - h/2, width, h, 12);
+      ctx.stroke();
+      
+      ctx.restore();
+      return;
+    }
+
+    // --- Laptop ---
+    if (isLaptop) {
+      h = width * 0.65; 
+      const bezel = width * 0.03;
+      ctx.save();
+      applyShadow(60, 30);
+      
+      // Lid
+      ctx.fillStyle = '#1c1c1e';
+      roundRect(ctx, cx - width/2, cy - h/2, width, h, 12);
+      ctx.fill();
+      
+      // Screen
+      ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2 - 10);
+      
+      // Base
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = '#2c2c2e';
+      ctx.beginPath();
+      ctx.moveTo(cx - width/2 + 20, cy + h/2);
+      ctx.lineTo(cx + width/2 - 20, cy + h/2);
+      ctx.lineTo(cx + width/2 + 40, cy + h/2 + 15);
+      ctx.lineTo(cx - width/2 - 40, cy + h/2 + 15);
+      ctx.fill();
+      
+      // Notch Detail
+      ctx.fillStyle = '#000';
+      roundRect(ctx, cx - 40, cy - h/2 + bezel, 80, 10, {tl: 0, tr: 0, bl: 5, br: 5});
+      ctx.fill();
+      
+      ctx.restore();
+    }
+    // --- Phone / Tablet ---
+    else if (isPhone) {
+      h = width * 2.16;
+      const radius = width * 0.15;
+      const bezel = width * 0.05;
+      
+      ctx.save();
+      applyShadow(50, 25);
+      
+      // Frame
+      ctx.fillStyle = '#1c1c1e';
+      roundRect(ctx, cx - width/2, cy - h/2, width, h, radius);
+      ctx.fill();
+      
+      // Screen
+      ctx.save();
+      roundRect(ctx, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2, radius - 5);
+      ctx.clip();
+      ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2);
+      ctx.restore();
+      
+      // Dynamic Island
+      ctx.fillStyle = 'black';
+      roundRect(ctx, cx - width*0.15, cy - h/2 + bezel*0.6, width*0.3, 22, 11);
+      ctx.fill();
+      
+      ctx.restore();
+    }
+    else { // Tablet
+      h = width * 1.33; 
+      const radius = 30;
+      const bezel = 20;
+       
+      ctx.save();
+      applyShadow(50, 25);
+      
+      ctx.fillStyle = '#1c1c1e';
+      roundRect(ctx, cx - width/2, cy - h/2, width, h, radius);
+      ctx.fill();
+       
+      ctx.save();
+      roundRect(ctx, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2, radius - 5);
+      ctx.clip();
+      ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2);
+      ctx.restore();
+      
+      ctx.restore();
+    }
   }
 
   function roundRect(ctx, x, y, width, height, radius) {
     if (typeof radius === 'undefined') radius = 0;
     if (typeof radius === 'number') {
       radius = {tl: radius, tr: radius, br: radius, bl: radius};
+    } else {
+      radius = Object.assign({tl: 0, tr: 0, br: 0, bl: 0}, radius);
     }
     ctx.beginPath();
     ctx.moveTo(x + radius.tl, y);
