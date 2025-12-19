@@ -752,18 +752,30 @@ document.addEventListener('DOMContentLoaded', () => {
     openShowcaseModal(selected, false, 'custom');
   }
 
-  // Main Unified Showcase Modal
+    // Main Unified Showcase Modal
   function openShowcaseModal(initialScreenshots, hasMoreAvailable = false, initialMode = 'default') {
     // State
     const state = {
       assignments: {}, // { 0: screenshot, 1: screenshot }
       available: hasMoreAvailable ? initialScreenshots : [...initialScreenshots], 
-      template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : '3-device'),
+      template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : 'hero-layout'),
       background: { type: 'gradient', value: ['#1a1a2e', '#0f3460'] },
       zoom: 0.8, // Start zoomed out slightly to see whole canvas
       customItems: [],
-      selectedItem: null
+      selectedItem: null,
+      texts: {} // { 'id': 'Text Value' }
     };
+
+    // Initialize default texts for templates - MUST be called after TEMPLATES is defined
+    const initTexts = () => {
+        const t = TEMPLATES.find(x => x.id === state.template);
+        if (t && t.textSlots) {
+            t.textSlots.forEach(slot => {
+                if (!state.texts[slot.id]) state.texts[slot.id] = slot.default;
+            });
+        }
+    };
+    // NOTE: initTexts() is called later, after TEMPLATES is defined
 
     // Smart Auto-assign: Match screenshots to slots based on device and capture type
     if (initialMode === 'single' && initialScreenshots[0]) {
@@ -872,13 +884,14 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Constants
     const TEMPLATES = [
+      // Standard Device Layouts
       { id: 'single-device', name: 'Single Device', icon: '📱', slots: [{ id: 0, defaultDevice: 'iphone-15-pro', label: 'Device' }] },
       { id: '3-device', name: 'Tri-Device', icon: '💻📱', slots: [
         { id: 0, defaultDevice: 'macbook-pro-16', label: 'Center (Desktop)' }, 
         { id: 1, defaultDevice: 'ipad-pro-11', label: 'Left (Tablet)' }, 
         { id: 2, defaultDevice: 'iphone-15-pro', label: 'Right (Phone)' }
       ]},
-      { id: 'hero-layout', name: 'Hero Shot', icon: '💎', slots: [
+      { id: 'hero-layout', name: 'Hero Header', icon: '💎', slots: [
         { id: 0, defaultDevice: 'macbook-pro-16', label: 'Main Feature' },
         { id: 1, defaultDevice: 'iphone-15-pro', label: 'Floating Mobile' }
       ]},
@@ -890,100 +903,71 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 0, defaultDevice: 'browser-light', label: 'Back Layer' },
         { id: 1, defaultDevice: 'iphone-15-pro', label: 'Front Device' }
       ]},
-      { id: 'browser-comparison', name: 'Browser Compare', icon: '⚖️', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Left Browser' },
-        { id: 1, defaultDevice: 'browser-light', label: 'Right Browser' }
+      { id: 'comparison', name: 'Comparison', icon: '⚖️', slots: [
+        { id: 0, defaultDevice: 'browser-light', label: 'Left/Before' },
+        { id: 1, defaultDevice: 'browser-light', label: 'Right/After' }
       ]},
-      { id: 'business-angled', name: 'Angled Overlap', icon: '📐', slots: [
+       { id: 'business-angled', name: 'Angled Trio', icon: '📐', slots: [
         { id: 0, defaultDevice: 'browser-light', label: 'Back' },
         { id: 1, defaultDevice: 'browser-light', label: 'Middle' },
         { id: 2, defaultDevice: 'browser-light', label: 'Front' }
       ]},
-      { id: 'floating-devices', name: 'Floating Trio', icon: '☁️', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-14', label: 'Laptop' },
-        { id: 1, defaultDevice: 'ipad-air', label: 'Tablet' },
-        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone' }
+      { id: 'bold-color-grid', name: 'Grid Layout', icon: '⬛', slots: [0, 1, 2, 3].map(i => ({ id: i, defaultDevice: 'none', label: `Screen ${i+1}` })) },
+      
+      // Professional Device Mockups (New)
+      { id: 'surface-display', name: 'Surface Display', icon: '🖥️📱', slots: [
+        { id: 0, defaultDevice: 'imac-24', label: 'Desktop (Center)' },
+        { id: 1, defaultDevice: 'ipad-pro-12', label: 'Tablet (Left)' },
+        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone (Right)' }
       ]},
-      { id: 'bold-color-grid', name: 'Color Grid', icon: '⬛', slots: [0, 1, 2, 3].map(i => ({ id: i, defaultDevice: 'none', label: `Screen ${i+1}` })) },
-      // New Templates - Viewport Focused
-      { id: 'app-store-style', name: 'App Store', icon: '📲', slots: [
-        { id: 0, defaultDevice: 'iphone-15-pro', label: 'Phone' }
+      { id: 'multi-device-showcase', name: '5-Device Showcase', icon: '🌐', slots: [
+        { id: 0, defaultDevice: 'imac-24', label: 'Desktop' },
+        { id: 1, defaultDevice: 'macbook-pro-16', label: 'Laptop' },
+        { id: 2, defaultDevice: 'ipad-pro-12', label: 'Tablet' },
+        { id: 3, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
+        { id: 4, defaultDevice: 'iphone-14', label: 'Phone 2' }
       ]},
-      { id: 'landing-hero', name: 'Landing Hero', icon: '🚀', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Browser' },
-        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Floating Phone' }
+      { id: 'angled-laptop', name: 'Angled Laptop', icon: '💻', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Laptop Screen' }
       ]},
-      { id: 'responsive-row', name: 'Responsive Row', icon: '📏', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Desktop' },
-        { id: 1, defaultDevice: 'ipad-air', label: 'Tablet' },
-        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone' }
+      { id: 'imac-spotlight', name: 'iMac Spotlight', icon: '🖥️', slots: [
+        { id: 0, defaultDevice: 'imac-24', label: 'iMac Display' }
       ]},
-      { id: 'before-after', name: 'Before / After', icon: '🔄', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Before' },
-        { id: 1, defaultDevice: 'browser-light', label: 'After' }
-      ]},
-      // New Templates - Full Page Focused
-      { id: 'fullpage-showcase', name: 'Full Page', icon: '📄', slots: [
-        { id: 0, defaultDevice: 'none', label: 'Full Page' }
-      ]},
-      { id: 'page-comparison', name: 'Compare Pages', icon: '📑', slots: [
-        { id: 0, defaultDevice: 'none', label: 'Page 1' },
-        { id: 1, defaultDevice: 'none', label: 'Page 2' }
-      ]},
-      { id: 'triple-page', name: 'Triple Page', icon: '📃', slots: [
-        { id: 0, defaultDevice: 'none', label: 'Page 1' },
-        { id: 1, defaultDevice: 'none', label: 'Page 2' },
-        { id: 2, defaultDevice: 'none', label: 'Page 3' }
-      ]},
-      // New Templates - Presentation Style
-      { id: 'minimal-center', name: 'Minimal Center', icon: '◻️', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Main Screen' }
-      ]},
-      { id: 'laptop-phone-stack', name: 'Laptop + Phone', icon: '💻📱', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Laptop (Back)' },
-        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Phone (Front)' }
-      ]},
-      { id: 'dual-phone', name: 'Dual Phone', icon: '📱📱', slots: [
-        { id: 0, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
-        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Phone 2' }
-      ]},
-      { id: 'triple-phone', name: 'Triple Phone', icon: '📱📱📱', slots: [
-        { id: 0, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
-        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Phone 2' },
-        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone 3' }
-      ]},
-      { id: 'tablet-centered', name: 'Tablet Center', icon: '📲', slots: [
-        { id: 0, defaultDevice: 'ipad-pro-12', label: 'Tablet' }
-      ]},
-      { id: 'laptop-centered', name: 'Laptop Center', icon: '💻', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Laptop' }
-      ]},
-      { id: 'browser-centered', name: 'Browser Center', icon: '🌐', slots: [
-        { id: 0, defaultDevice: 'browser-chrome', label: 'Browser' }
-      ]},
-      // New Templates - Text-Ready / Marketing
-      { id: 'saas-hero', name: 'SaaS Hero', icon: '💼', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Product Shot' }
-      ]},
-      { id: 'feature-left', name: 'Feature Left', icon: '⬅️', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Feature Screen' }
-      ]},
-      { id: 'feature-right', name: 'Feature Right', icon: '➡️', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Feature Screen' }
-      ]},
-      { id: 'product-spotlight', name: 'Spotlight', icon: '🔦', slots: [
-        { id: 0, defaultDevice: 'browser-light', label: 'Main Product' },
-        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Mobile View' }
-      ]},
-      { id: 'multi-device-wave', name: 'Device Wave', icon: '🌊', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Desktop' },
-        { id: 1, defaultDevice: 'ipad-air', label: 'Tablet' },
-        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Phone 1' },
-        { id: 3, defaultDevice: 'iphone-15-pro', label: 'Phone 2' }
-      ]},
+      
+      // Text & Marketing Templates
+      { id: 'social-post', name: 'Social Post', icon: '💬', 
+        slots: [{ id: 0, defaultDevice: 'macbook-pro-16', label: 'Visual' }],
+        textSlots: [
+          { id: 'title', label: 'Headline', default: 'New Feature Alert', type: 'h1' },
+          { id: 'subtitle', label: 'Description', default: 'Check out this amazing update we just shipped.', type: 'p' }
+        ]
+      },
+      { id: 'feature-announce', name: 'Feature Announce', icon: '📢', 
+        slots: [{ id: 0, defaultDevice: 'iphone-15-pro', label: 'App View' }],
+        textSlots: [
+          { id: 'title', label: 'Big Announcement', default: 'Introducing v2.0', type: 'h1' },
+          { id: 'tagline', label: 'Tagline', default: 'Faster. Better. Stronger.', type: 'span' }
+        ]
+      },
+      { id: 'linkedin-slide', name: 'LinkedIn Slide', icon: '👔', 
+        slots: [{ id: 0, defaultDevice: 'macbook-pro-16', label: 'Content' }],
+        textSlots: [
+          { id: 'title', label: 'Key Takeaway', default: 'How we optimized performance by 300%', type: 'h1' }
+        ]
+      },
+      { id: 'quote-card', name: 'Quote Card', icon: '❝', 
+        slots: [], // No image slots, just text
+        textSlots: [
+          { id: 'quote', label: 'Quote', default: 'DevShot has completely changed how we showcase our work.', type: 'quote' },
+          { id: 'author', label: 'Author', default: '@Hamzaisadev', type: 'span' }
+        ]
+      },
+      
       { id: 'custom', name: 'Custom Canvas', icon: '🎨', slots: [] }
     ];
 
+    // Initialize text values now that TEMPLATES is defined
+    initTexts();
 
     const DEVICE_TYPES = [
       { id: 'none', name: 'No Frame', icon: '🖼️' },
@@ -1204,7 +1188,24 @@ document.addEventListener('DOMContentLoaded', () => {
         return;
       }
 
-      list.innerHTML = currentTpl.slots.map(slot => {
+      // Render Text Slots (if any)
+      let textInputsHtml = '';
+      if (currentTpl.textSlots) {
+        textInputsHtml = `
+            <div style="margin-bottom:24px;border-bottom:1px solid rgba(255,255,255,0.05);padding-bottom:16px;">
+                <h4 style="margin:0 0 12px 0;font-size:0.75rem;color:rgba(255,255,255,0.5);text-transform:uppercase;">Text Content</h4>
+                ${currentTpl.textSlots.map(slot => `
+                    <div style="margin-bottom:12px;">
+                        <label style="display:block;font-size:0.75rem;color:rgba(255,255,255,0.7);margin-bottom:6px;">${slot.label}</label>
+                        <input type="text" class="text-slot-input" data-id="${slot.id}" value="${state.texts[slot.id] || ''}" 
+                            style="width:100%;background:#111;border:1px solid rgba(255,255,255,0.1);color:white;padding:10px;border-radius:6px;font-size:0.9rem;">
+                    </div>
+                `).join('')}
+            </div>
+        `;
+      }
+      
+      list.innerHTML = textInputsHtml + currentTpl.slots.map(slot => {
         const assigned = state.assignments[slot.id];
         const currentDeviceId = getSlotDevice(slot.id) || slot.defaultDevice;
         
@@ -1246,6 +1247,15 @@ document.addEventListener('DOMContentLoaded', () => {
       }).join('');
 
       // Attach Listeners
+      
+      // Text Input Listeners
+      list.querySelectorAll('.text-slot-input').forEach(input => {
+        input.addEventListener('input', (e) => {
+            state.texts[e.target.dataset.id] = e.target.value;
+            render();
+        });
+      });
+
       list.querySelectorAll('.visual-picker-btn').forEach(btn => {
         btn.onclick = () => {
           const slotId = parseInt(btn.dataset.slot);
@@ -1425,11 +1435,42 @@ document.addEventListener('DOMContentLoaded', () => {
          }
       }
 
+
+        // Helper for text drawing
+        function drawText(ctx, text, x, y, options = {}) {
+            const { size = 60, color = 'white', weight = 'bold', align = 'left', maxWidth = 1000, font = 'Inter, system-ui, sans-serif' } = options;
+            ctx.font = `${weight} ${size}px ${font}`;
+            ctx.fillStyle = color;
+            ctx.textAlign = align;
+            ctx.textBaseline = 'top';
+            
+            // Basic line wrapping
+            const words = text.split(' ');
+            let line = '';
+            let lineY = y;
+            const lineHeight = size * 1.2;
+            
+            for(let n = 0; n < words.length; n++) {
+                const testLine = line + words[n] + ' ';
+                const metrics = ctx.measureText(testLine);
+                const testWidth = metrics.width;
+                if (testWidth > maxWidth && n > 0) {
+                    ctx.fillText(line, x, lineY);
+                    line = words[n] + ' ';
+                    lineY += lineHeight;
+                } else {
+                    line = testLine;
+                }
+            }
+            ctx.fillText(line, x, lineY);
+        }
+
+       // --- Template Rendering Logic ---
+
       if (state.template === 'single-device') {
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 900);
       }
       else if (state.template === '3-device') {
-        // Center, Left, Right
         if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 460, 600, 520);
         if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1460, 600, 520);
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 500, 1000);
@@ -1438,17 +1479,14 @@ document.addEventListener('DOMContentLoaded', () => {
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 850, 500, 1100);
         if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1450, 680, 280);
       }
-      // NEW: Isometric Floating (3D Tilt Effect)
       else if (state.template === 'isometric-floating') {
         ctx.save();
-        // Main device with isometric transform
         if(loaded[0]) {
           ctx.translate(700, 450);
-          ctx.transform(1, 0.1, -0.2, 1, 0, 0); // Skew for isometric
+          ctx.transform(1, 0.1, -0.2, 1, 0, 0); 
           drawDevice(ctx, getSlotDevice(0), loaded[0], 0, 0, 1000);
         }
         ctx.restore();
-        // Floating phone
         if(loaded[1]) {
           ctx.save();
           ctx.translate(1400, 600);
@@ -1457,9 +1495,7 @@ document.addEventListener('DOMContentLoaded', () => {
           ctx.restore();
         }
       }
-      // NEW: Marketing Stack (Depth Overlap)
       else if (state.template === 'marketing-stack') {
-        // Back layer (browser/desktop)
         if(loaded[0]) {
           ctx.save();
           ctx.shadowColor = 'rgba(0,0,0,0.4)';
@@ -1468,7 +1504,6 @@ document.addEventListener('DOMContentLoaded', () => {
           drawDevice(ctx, getSlotDevice(0), loaded[0], 800, 500, 1000);
           ctx.restore();
         }
-        // Front device (phone)
         if(loaded[1]) {
           ctx.save();
           ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -1478,22 +1513,34 @@ document.addEventListener('DOMContentLoaded', () => {
           ctx.restore();
         }
       }
-      // NEW: Browser Comparison (Side-by-Side)
-      else if (state.template === 'browser-comparison') {
+      else if (state.template === 'comparison') {
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 500, 540, 780);
         if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1420, 540, 780);
-        // Add comparison divider
-        ctx.strokeStyle = 'rgba(255,255,255,0.2)';
-        ctx.lineWidth = 2;
+        
+        // Stylish Divider
+        ctx.save();
+        ctx.strokeStyle = 'white';
+        ctx.lineWidth = 4;
         ctx.beginPath();
-        ctx.moveTo(960, 100);
-        ctx.lineTo(960, 980);
+        ctx.moveTo(960, 200);
+        ctx.lineTo(960, 880);
         ctx.stroke();
+        
+        ctx.fillStyle = '#111';
+        ctx.beginPath();
+        ctx.arc(960, 540, 40, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.stroke();
+        
+        ctx.fillStyle = 'white';
+        ctx.font = 'bold 24px Inter, sans-serif';
+        ctx.textAlign = 'center';
+        ctx.textBaseline = 'middle';
+        ctx.fillText('VS', 960, 542);
+        ctx.restore();
       }
-
       else if (state.template === 'business-angled') {
         ctx.save();
-        // Angled transforms
         const drawAngled = (slotId, x, y, w, rot) => {
            if(!loaded[slotId]) return;
            ctx.save();
@@ -1507,13 +1554,6 @@ document.addEventListener('DOMContentLoaded', () => {
         drawAngled(2, 1320, 630, 800, -10);
         ctx.restore();
       }
-      else if (state.template === 'floating-devices') {
-        // Draw laptop FIRST (behind)
-        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 480, 1000);
-        // Then tablet and phone on top
-        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 480, 580, 450);
-        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1450, 620, 280);
-      }
       else if (state.template === 'bold-color-grid') {
         const padding = 100;
         const w = (1920 - padding*3) / 2;
@@ -1526,87 +1566,70 @@ document.addEventListener('DOMContentLoaded', () => {
           ctx.strokeRect(x, y, w, h);
           ctx.drawImage(loaded[slotId], x, y, w, h);
         };
-        
         drawGridItem(0, padding, padding);
         drawGridItem(1, padding*2 + w, padding);
         drawGridItem(2, padding, padding*2 + h);
         drawGridItem(3, padding*2 + w, padding*2 + h);
       }
-      // NEW: App Store Style - Centered phone with gradient glow
-      else if (state.template === 'app-store-style') {
-        // Draw glow behind phone
-        ctx.save();
-        const gradient = ctx.createRadialGradient(960, 540, 0, 960, 540, 600);
-        gradient.addColorStop(0, 'rgba(99,102,241,0.3)');
-        gradient.addColorStop(1, 'rgba(99,102,241,0)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 1920, 1080);
-        ctx.restore();
-        
-        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 400);
-      }
-      // NEW: Landing Hero - Large browser with floating phone
-      else if (state.template === 'landing-hero') {
-        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 850, 520, 1200);
-        if(loaded[1]) {
-          ctx.save();
-          ctx.shadowColor = 'rgba(0,0,0,0.6)';
-          ctx.shadowBlur = 80;
-          ctx.shadowOffsetY = 40;
-          drawDevice(ctx, getSlotDevice(1), loaded[1], 1500, 620, 320);
-          ctx.restore();
-        }
-      }
-      // NEW: Responsive Row - Three devices side by side
-      else if (state.template === 'responsive-row') {
-        const baseY = 540;
-        // Desktop left
-        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 420, baseY, 720);
-        // Tablet center  
-        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1000, baseY + 60, 380);
-        // Phone right
-        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1520, baseY + 100, 280);
-      }
-      // NEW: Before/After - Two browsers with comparison divider
-      else if (state.template === 'before-after') {
-        // Constrain images to fit properly (especially for fullpage)
-        const maxBrowserW = 750;
-        const maxBrowserH = 800;
-        
-        const drawConstrainedDevice = (slotId, cx) => {
-          if (!loaded[slotId]) return;
-          const img = loaded[slotId];
-          let w = maxBrowserW;
-          let h = w * (img.height / img.width);
-          if (h > maxBrowserH) {
-            h = maxBrowserH;
-            w = h * (img.width / img.height);
+      
+      // --- NEW TEXT TEMPLATES ---
+      
+      else if (state.template === 'social-post') {
+          // Left: Image, Right: Text
+          if(loaded[0]) {
+              drawDevice(ctx, getSlotDevice(0), loaded[0], 600, 540, 900);
           }
-          drawDevice(ctx, getSlotDevice(slotId), loaded[slotId], cx, 540, w);
-        };
-        
-        drawConstrainedDevice(0, 500);
-        drawConstrainedDevice(1, 1420);
-        
-        // Divider with labels
-        ctx.save();
-        ctx.strokeStyle = 'rgba(255,255,255,0.3)';
-        ctx.lineWidth = 3;
-        ctx.setLineDash([10, 5]);
-        ctx.beginPath();
-        ctx.moveTo(960, 80);
-        ctx.lineTo(960, 1000);
-        ctx.stroke();
-        ctx.setLineDash([]);
-        
-        // Labels
-        ctx.font = 'bold 24px Inter, system-ui, sans-serif';
-        ctx.fillStyle = 'rgba(255,255,255,0.8)';
-        ctx.textAlign = 'center';
-        ctx.fillText('BEFORE', 500, 120);
-        ctx.fillText('AFTER', 1420, 120);
-        ctx.restore();
+          
+          if (state.texts.title) {
+            drawText(ctx, state.texts.title, 1100, 350, { size: 80, weight: 'bold', maxWidth: 700 });
+          }
+           if (state.texts.subtitle) {
+            drawText(ctx, state.texts.subtitle, 1100, 350 + (state.texts.title ? 120 : 0), { size: 40, weight: 'normal', color: 'rgba(255,255,255,0.8)', maxWidth: 700 });
+          }
       }
+      
+      else if (state.template === 'feature-announce') {
+           // Small header, big title, device bottom
+           if (state.texts.tagline) {
+             drawText(ctx, state.texts.tagline.toUpperCase(), 960, 150, { size: 30, weight: 'bold', align: 'center', color: '#6366f1', letterSpacing: 4 });
+           }
+           if (state.texts.title) {
+             drawText(ctx, state.texts.title, 960, 200, { size: 100, weight: '900', align: 'center', maxWidth: 1600 });
+           }
+           
+           if(loaded[0]) {
+             drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 750, 600);
+           }
+      }
+      
+      else if (state.template === 'linkedin-slide') {
+          // Text Top, Wide Image Bottom
+           if (state.texts.title) {
+             drawText(ctx, state.texts.title, 960, 150, { size: 90, weight: 'bold', align: 'center', maxWidth: 1400 });
+           }
+           
+           if(loaded[0]) {
+             // Draw a "window" style if no device frame
+             drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 700, 1100);
+           }
+      }
+      
+      else if (state.template === 'quote-card') {
+          // Giant quotes
+          ctx.fillStyle = 'rgba(255,255,255,0.1)';
+          ctx.font = '500px sans-serif';
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText('“', 960, 540);
+          
+          if (state.texts.quote) {
+             drawText(ctx, state.texts.quote, 960, 400, { size: 70, weight: 'medium', align: 'center', maxWidth: 1400, font: 'Georgia, serif', style: 'italic' });
+          }
+          if (state.texts.author) {
+             drawText(ctx, `— ${state.texts.author}`, 960, 800, { size: 40, weight: 'bold', align: 'center', color: '#6366f1' });
+          }
+      }
+
       // NEW: Full Page Showcase - Single full-page with decorative frame
       else if (state.template === 'fullpage-showcase') {
         if(loaded[0]) {
