@@ -27,6 +27,17 @@
       </div>
     </header>
 
+    <!-- Sub-Header for Bulk Actions -->
+    <div class="sub-header">
+      <div class="sub-header-left">
+        <button class="btn btn-sm btn-secondary" id="btn-expand-all">📂 Expand All</button>
+        <button class="btn btn-sm btn-secondary" id="btn-collapse-all">📁 Collapse All</button>
+      </div>
+      <div class="sub-header-right">
+        <span id="gallery-stats">Total: 0 screenshots</span>
+      </div>
+    </div>
+
     <!-- Toolbar -->
     <div class="toolbar">
       <div class="toolbar-left">
@@ -51,6 +62,15 @@
         </button>
       </div>
       <div class="toolbar-right">
+        <div class="search-box">
+          <input type="text" id="gallery-search" placeholder="Search by name or domain..." class="input">
+        </div>
+        <select class="select" id="sort-order">
+          <option value="date-desc">Newest First</option>
+          <option value="date-asc">Oldest First</option>
+          <option value="name-asc">Name (A-Z)</option>
+          <option value="name-desc">Name (Z-A)</option>
+        </select>
         <select class="select" id="filter-domain">
           <option value="">All Domains</option>
         </select>
@@ -58,6 +78,7 @@
           <option value="">All Types</option>
           <option value="viewport">Viewport</option>
           <option value="fullpage">Full Page</option>
+          <option value="showcase">Showcase</option>
         </select>
         <select class="select" id="filter-device">
           <option value="">All Devices</option>
@@ -65,6 +86,10 @@
           <option value="mobile">Mobile</option>
           <option value="tablet">Tablet</option>
         </select>
+        <div class="view-toggles">
+          <button class="btn btn-icon active" id="view-grid" title="Grid View">📱</button>
+          <button class="btn btn-icon" id="view-list" title="List View">≡</button>
+        </div>
       </div>
     </div>
 
@@ -92,8 +117,9 @@
     </footer>
   </div>
 
-  <!-- JSZip for ZIP download functionality -->
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/jszip/3.10.1/jszip.min.js"></script>
+  <!-- Local Libraries for MV3 Compatibility -->
+  <script src="jszip.min.js"></script>
+  <script src="jspdf.umd.min.js"></script>
   <script src="gallery.js"></script>
 </body>
 </html>

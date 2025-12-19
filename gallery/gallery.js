@@ -22,6 +22,10 @@ document.addEventListener('DOMContentLoaded', () => {
   // State
   let screenshots = [];
   let selectedIds = new Set();
+  let lastSelectedId = null; // For shift-click selecting
+  let currentSort = 'date-desc';
+  let searchQuery = '';
+  let viewMode = 'grid'; // 'grid' or 'list'
 
   // Initialize
   loadScreenshots();
@@ -43,6 +47,76 @@ document.addEventListener('DOMContentLoaded', () => {
   filterDomain.addEventListener('change', renderGallery);
   filterType.addEventListener('change', renderGallery);
   filterDevice.addEventListener('change', renderGallery);
+  
+  // Keyboard Shortcuts
+  document.addEventListener('keydown', (e) => {
+    // Skip if user is typing in search or other inputs
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      selectAllCheckbox.click();
+    }
+    if (e.key === 'Delete' || e.key === 'Backspace') {
+      if (selectedIds.size > 0) deleteSelected();
+    }
+    if (e.key === 'd' && selectedIds.size > 0) {
+      downloadSelected();
+    }
+    if (e.key === 'c' && selectedIds.size > 0) {
+       // Copy first selected if one, or alert
+       const first = screenshots.find(s => selectedIds.has(s.id));
+       if (first) {
+         const card = document.querySelector(`[data-id="${first.id}"]`);
+         const copyBtn = card?.querySelector('.btn-copy');
+         copyBtn?.click();
+       }
+    }
+    if (e.key === 'Escape') {
+      selectedIds.clear();
+      updateSelectionState();
+      renderGallery();
+    }
+  });
+
+  const sortSelect = document.getElementById('sort-order');
+  const searchInput = document.getElementById('gallery-search');
+  const gridViewBtn = document.getElementById('view-grid');
+  const listViewBtn = document.getElementById('view-list');
+
+  sortSelect.addEventListener('change', (e) => {
+    currentSort = e.target.value;
+    renderGallery();
+  });
+
+  searchInput.addEventListener('input', (e) => {
+    searchQuery = e.target.value.toLowerCase();
+    renderGallery();
+  });
+
+  gridViewBtn.addEventListener('click', () => {
+    viewMode = 'grid';
+    gridViewBtn.classList.add('active');
+    listViewBtn.classList.remove('active');
+    galleryContainer.classList.remove('list-view');
+    renderGallery();
+  });
+
+  listViewBtn.addEventListener('click', () => {
+    viewMode = 'list';
+    listViewBtn.classList.add('active');
+    gridViewBtn.classList.remove('active');
+    galleryContainer.classList.add('list-view');
+    renderGallery();
+  });
+
+  document.getElementById('btn-expand-all').addEventListener('click', () => {
+    document.querySelectorAll('.domain-header.collapsed').forEach(h => h.click());
+  });
+
+  document.getElementById('btn-collapse-all').addEventListener('click', () => {
+    document.querySelectorAll('.domain-header:not(.collapsed)').forEach(h => h.click());
+  });
 
   // Load screenshots from IndexedDB
   async function loadScreenshots() {
@@ -51,6 +125,13 @@ document.addEventListener('DOMContentLoaded', () => {
       screenshots = await db.getAll() || [];
       updateDomainFilter();
       renderGallery();
+      
+      // Update stats
+      const statsEl = document.getElementById('gallery-stats');
+      if (statsEl) {
+        const domains = new Set(screenshots.map(s => s.domain)).size;
+        statsEl.textContent = `Total: ${screenshots.length} assets across ${domains} sites`;
+      }
     } catch (error) {
       console.error('Failed to load screenshots:', error);
       screenshots = [];
@@ -87,8 +168,16 @@ document.addEventListener('DOMContentLoaded', () => {
     groups.forEach(g => g.remove());
 
     // Apply filters
-    let filtered = screenshots;
+    let filtered = [...screenshots];
     
+    // Search
+    if (searchQuery) {
+      filtered = filtered.filter(s => 
+        s.domain.toLowerCase().includes(searchQuery) || 
+        s.filename.toLowerCase().includes(searchQuery)
+      );
+    }
+
     if (filterDomain.value) {
       filtered = filtered.filter(s => s.domain === filterDomain.value);
     }
@@ -98,6 +187,15 @@ document.addEventListener('DOMContentLoaded', () => {
     if (filterDevice.value) {
       filtered = filtered.filter(s => s.device === filterDevice.value);
     }
+
+    // Sort
+    filtered.sort((a, b) => {
+      if (currentSort === 'date-desc') return b.timestamp - a.timestamp;
+      if (currentSort === 'date-asc') return a.timestamp - b.timestamp;
+      if (currentSort === 'name-asc') return a.filename.localeCompare(b.filename);
+      if (currentSort === 'name-desc') return b.filename.localeCompare(a.filename);
+      return 0;
+    });
 
     // Show/hide empty state
     emptyState.style.display = filtered.length === 0 ? 'flex' : 'none';
@@ -125,22 +223,52 @@ document.addEventListener('DOMContentLoaded', () => {
   function createDomainGroup(domain, domainScreenshots) {
     const group = document.createElement('div');
     group.className = 'domain-group';
+    const allSelected = domainScreenshots.every(s => selectedIds.has(s.id));
+    
     group.innerHTML = `
       <div class="domain-header">
-        <span class="domain-icon">📁</span>
-        <span class="domain-name">${domain}</span>
-        <span class="domain-count">${domainScreenshots.length} screenshots</span>
-        <button class="btn btn-sm btn-secondary domain-download-zip-btn" title="Download All as ZIP">📦 ZIP</button>
-        <button class="btn btn-sm btn-primary domain-showcase-btn" title="Create Showcase">🖼️ Showcase</button>
-        <span class="domain-toggle">▼</span>
+        <div class="domain-info">
+          <input type="checkbox" class="group-checkbox" ${allSelected ? 'checked' : ''} title="Select all in group">
+          <span class="domain-icon">📁</span>
+          <span class="domain-name">${domain}</span>
+          <span class="domain-count">${domainScreenshots.length}</span>
+        </div>
+        <div class="domain-actions">
+          <button class="btn btn-sm btn-secondary domain-copy-urls-btn" title="Copy all URLs in group">🔗 URLs</button>
+          <button class="btn btn-sm btn-secondary domain-download-zip-btn" title="Download All as ZIP">📦 ZIP</button>
+          <button class="btn btn-sm btn-primary domain-showcase-btn" title="Create Showcase">🖼️ Showcase</button>
+          <span class="domain-toggle">▼</span>
+        </div>
       </div>
-      <div class="screenshot-grid"></div>
+      <div class="screenshot-grid ${viewMode === 'list' ? 'list-view' : ''}"></div>
     `;
 
     const header = group.querySelector('.domain-header');
     const grid = group.querySelector('.screenshot-grid');
+    const groupCheckbox = group.querySelector('.group-checkbox');
     const showcaseBtn = header.querySelector('.domain-showcase-btn');
     const zipBtn = header.querySelector('.domain-download-zip-btn');
+    const copyUrlsBtn = header.querySelector('.domain-copy-urls-btn');
+
+    // Group checkbox selection
+    groupCheckbox.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const checked = groupCheckbox.checked;
+      domainScreenshots.forEach(s => toggleSelect(s.id, checked));
+      renderGallery(); // Re-render to update badges/checkboxes
+    });
+
+    // Copy all URLs
+    copyUrlsBtn.addEventListener('click', (e) => {
+      e.stopPropagation();
+      const urls = domainScreenshots.map(s => s.url).filter(u => u && u !== 'Showcase').join('\n');
+      if (urls) {
+        navigator.clipboard.writeText(urls);
+        const originalText = copyUrlsBtn.innerHTML;
+        copyUrlsBtn.innerHTML = '✅ Copied';
+        setTimeout(() => copyUrlsBtn.innerHTML = originalText, 2000);
+      }
+    });
 
     // Download all as ZIP
     zipBtn.addEventListener('click', async (e) => {
@@ -157,9 +285,9 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Toggle collapse
     header.addEventListener('click', (e) => {
-      if (e.target.classList.contains('domain-showcase-btn') || e.target.classList.contains('domain-download-zip-btn')) return;
+      if (e.target.closest('.domain-actions') || e.target.classList.contains('group-checkbox')) return;
       header.classList.toggle('collapsed');
-      grid.style.display = header.classList.contains('collapsed') ? 'none' : 'grid';
+      grid.style.display = header.classList.contains('collapsed') ? 'none' : (viewMode === 'grid' ? 'grid' : 'flex');
     });
 
     // Add screenshot cards
@@ -187,7 +315,9 @@ document.addEventListener('DOMContentLoaded', () => {
     const isVideo = screenshot.captureType === 'video' || screenshot.filename?.endsWith('.webm');
     
     card.innerHTML = `
-      <input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''}>
+      <div class="card-selection-overlay">
+        <input type="checkbox" class="card-checkbox" ${isSelected ? 'checked' : ''}>
+      </div>
       <div class="screenshot-preview">
         ${isVideo ? `
           <video class="card-image card-video" src="${screenshot.dataUrl}" muted loop></video>
@@ -195,14 +325,18 @@ document.addEventListener('DOMContentLoaded', () => {
           <img class="card-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}" loading="lazy">
         `}
         <div class="screenshot-overlay">
-          <button class="btn btn-icon btn-view" title="View Full">👁️</button>
-          <button class="btn btn-icon btn-mockup" title="Device Mockup">📱</button>
-          <button class="btn btn-icon btn-download" title="Download">📥</button>
-          <button class="btn btn-icon btn-delete" title="Delete">🗑️</button>
+          <button class="btn btn-icon btn-view" title="View Full (V)">👁️</button>
+          <button class="btn btn-icon btn-copy" title="Copy to Clipboard (C)">📋</button>
+          <button class="btn btn-icon btn-mockup" title="Device Mockup (M)">📱</button>
+          <button class="btn btn-icon btn-download" title="Download (D)">📥</button>
+          <button class="btn btn-icon btn-delete" title="Delete (Del)">🗑️</button>
         </div>
       </div>
       <div class="card-info">
-        <div class="card-filename">${screenshot.filename}</div>
+        <div class="card-title-row">
+          <div class="card-filename" title="Click to rename">${screenshot.filename}</div>
+          <button class="btn btn-icon btn-rename" title="Rename" style="padding:2px; font-size:10px;">✏️</button>
+        </div>
         <div class="card-meta">
           <span class="card-badge ${screenshot.device}">${screenshot.device}</span>
           <span class="card-badge ${screenshot.captureType}">${screenshot.captureType}</span>
@@ -216,22 +350,43 @@ document.addEventListener('DOMContentLoaded', () => {
     const checkbox = card.querySelector('.card-checkbox');
     const imagePreview = card.querySelector('.screenshot-preview');
     const viewBtn = card.querySelector('.btn-view');
+    const copyBtn = card.querySelector('.btn-copy');
     const mockupBtn = card.querySelector('.btn-mockup');
     const downloadBtn = card.querySelector('.btn-download');
     const deleteBtn = card.querySelector('.btn-delete');
+    const renameBtn = card.querySelector('.btn-rename');
     const infoArea = card.querySelector('.card-info');
 
-    checkbox.addEventListener('change', (e) => {
-      e.stopPropagation();
-      toggleSelect(screenshot.id, checkbox.checked);
+    // Robust Selection Action
+    card.addEventListener('click', (e) => {
+      // Don't trigger if a button was clicked
+      if (e.target.closest('.btn-icon') || e.target.closest('.btn-rename')) return;
+      
+      const isCurrentlySelected = selectedIds.has(screenshot.id);
+      
+      // Shift-click support
+      if (e.shiftKey && lastSelectedId !== null) {
+        const allFilteredIds = Array.from(document.querySelectorAll('.screenshot-card')).map(c => parseInt(c.dataset.id));
+        const startIdx = allFilteredIds.indexOf(lastSelectedId);
+        const endIdx = allFilteredIds.indexOf(screenshot.id);
+        if (startIdx !== -1 && endIdx !== -1) {
+          const range = allFilteredIds.slice(Math.min(startIdx, endIdx), Math.max(startIdx, endIdx) + 1);
+          const shouldSelect = !isCurrentlySelected;
+          range.forEach(id => toggleSelect(id, shouldSelect));
+          lastSelectedId = screenshot.id;
+          return;
+        }
+      }
+
+      toggleSelect(screenshot.id, !isCurrentlySelected);
+      lastSelectedId = screenshot.id;
+      checkbox.checked = !isCurrentlySelected;
     });
 
-    // Toggle selection by clicking info area
-    infoArea.addEventListener('click', (e) => {
+    checkbox.addEventListener('click', (e) => {
       e.stopPropagation();
-      const isSelected = selectedIds.has(screenshot.id);
-      toggleSelect(screenshot.id, !isSelected);
-      checkbox.checked = !isSelected;
+      toggleSelect(screenshot.id, checkbox.checked);
+      lastSelectedId = screenshot.id;
     });
 
     // Overlay Action: View
@@ -240,9 +395,43 @@ document.addEventListener('DOMContentLoaded', () => {
       openPreview(screenshot);
     });
 
+    // Copy to Clipboard
+    copyBtn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      try {
+        const response = await fetch(screenshot.dataUrl);
+        const blob = await response.blob();
+        await navigator.clipboard.write([
+          new ClipboardItem({ [blob.type]: blob })
+        ]);
+        copyBtn.innerHTML = '✅';
+        setTimeout(() => copyBtn.innerHTML = '📋', 2000);
+      } catch (err) {
+        console.error('Copy failed:', err);
+        alert('Failed to copy image to clipboard.');
+      }
+    });
+
+    // Rename
+    const renameAction = async (e) => {
+      e?.stopPropagation();
+      const newName = prompt('Enter new filename:', screenshot.filename);
+      if (newName && newName !== screenshot.filename) {
+        screenshot.filename = newName;
+        await db.update(screenshot);
+        renderGallery();
+      }
+    };
+    renameBtn.addEventListener('click', renameAction);
+    card.querySelector('.card-filename').addEventListener('click', (e) => {
+      e.stopPropagation();
+      renameAction();
+    });
+
     // Overlay Action: Mockup
-    if (isVideo) {
+    if (isVideo || screenshot.captureType === 'showcase') {
       mockupBtn.style.display = 'none';
+      copyBtn.style.display = 'none';
     } else {
       mockupBtn.addEventListener('click', (e) => {
         e.stopPropagation();
@@ -290,13 +479,17 @@ document.addEventListener('DOMContentLoaded', () => {
       selectedIds.add(id);
     } else {
       selectedIds.delete(id);
+      if (lastSelectedId === id) lastSelectedId = null;
     }
     updateSelectionState();
     
-    const card = document.querySelector(`[data-id="${id}"]`);
-    if (card) {
-      card.classList.toggle('selected', selected);
-    }
+    // Find all cards with this ID (could be in multiple groups if filtered/grouped weirdly)
+    const cards = document.querySelectorAll(`[data-id="${id}"]`);
+    cards.forEach(card => {
+       card.classList.toggle('selected', selected);
+       const cb = card.querySelector('.card-checkbox');
+       if (cb) cb.checked = selected;
+    });
   }
 
   function toggleSelectAll() {
@@ -322,7 +515,16 @@ document.addEventListener('DOMContentLoaded', () => {
     // Enable custom canvas when any screenshots selected
     if (customCanvasBtn) customCanvasBtn.disabled = !hasSelection;
 
-    selectAllCheckbox.checked = selectedIds.size === screenshots.length && screenshots.length > 0;
+    selectAllCheckbox.checked = screenshots.length > 0 && selectedIds.size >= screenshots.length;
+    
+    // Update group checkboxes visually
+    document.querySelectorAll('.group-checkbox').forEach(cb => {
+       // Check if all cards in this group are selected
+       const group = cb.closest('.domain-group');
+       const groupShotsCount = group.querySelectorAll('.screenshot-card').length;
+       const groupSelectedCount = group.querySelectorAll('.screenshot-card.selected').length;
+       cb.checked = groupShotsCount > 0 && groupSelectedCount === groupShotsCount;
+    });
   }
 
   // Actions
@@ -387,8 +589,47 @@ document.addEventListener('DOMContentLoaded', () => {
     });
   }
 
-  function exportPdf() {
-     alert('PDF Export coming in next update!');
+  async function exportPdf() {
+    if (selectedIds.size === 0) return;
+    
+    // Check if jsPDF is available
+    if (typeof jspdf === 'undefined' && typeof window.jspdf === 'undefined') {
+       alert('PDF library not loaded. Please refresh the page.');
+       return;
+    }
+
+    const { jsPDF } = window.jspdf;
+    const doc = new jsPDF();
+    const selected = screenshots.filter(s => selectedIds.has(s.id));
+    
+    exportPdfBtn.innerHTML = '⏳ PDF...';
+    exportPdfBtn.disabled = true;
+
+    try {
+      for (let i = 0; i < selected.length; i++) {
+        if (i > 0) doc.addPage();
+        
+        const s = selected[i];
+        const imgProps = doc.getImageProperties(s.dataUrl);
+        const pdfWidth = doc.internal.pageSize.getWidth();
+        const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
+        
+        doc.addImage(s.dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
+        doc.text(`${s.domain} - ${formatDate(s.timestamp)}`, 10, pdfHeight + 10);
+      }
+      
+      doc.save(`DevShot_Export_${Date.now()}.pdf`);
+      exportPdfBtn.innerHTML = '✅ Done';
+    } catch (err) {
+      console.error(err);
+      alert('PDF Export failed: ' + err.message);
+      exportPdfBtn.innerHTML = '❌ Failed';
+    } finally {
+      setTimeout(() => {
+        exportPdfBtn.innerHTML = '<span>📄</span> Export PDF';
+        exportPdfBtn.disabled = false;
+      }, 2000);
+    }
   }
 
   // Download all screenshots in a domain as a ZIP file
@@ -812,9 +1053,12 @@ document.addEventListener('DOMContentLoaded', () => {
 
         <!-- CENTER: Canvas (Fixed, no scroll) -->
         <div class="ui-canvas-area" style="flex:1;background:repeating-linear-gradient(45deg,#08080a,#08080a 10px,#0a0a0c 10px,#0a0a0c 20px);position:relative;display:flex;flex-direction:column;overflow:hidden;">
-          <div class="canvas-toolbar" style="padding:16px;display:flex;justify-content:flex-end;align-items:center;position:absolute;top:0;left:0;right:0;z-index:10;">
+          <div class="canvas-toolbar" style="padding:16px;display:flex;justify-content:flex-end;align-items:center;position:absolute;top:0;left:0;right:0;z-index:10;gap:12px;">
+            <button id="save-gallery-btn" style="padding:10px 24px;background:rgba(255,255,255,0.05);color:white;border:1px solid rgba(255,255,255,0.1);border-radius:8px;font-weight:600;cursor:pointer;display:flex;align-items:center;gap:8px;transition:all 0.2s;">
+              <span>🎨</span> Save to Gallery
+            </button>
             <button id="download-btn" style="padding:10px 24px;background:#6366f1;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(99,102,241,0.4);display:flex;align-items:center;gap:8px;">
-              <span>💾</span> Save Image
+              <span>💾</span> Download Image
             </button>
           </div>
           
@@ -1660,6 +1904,67 @@ document.addEventListener('DOMContentLoaded', () => {
     };
     // Canvas is now fixed scale - no zoom needed
 
+    // Save to Gallery
+    overlay.querySelector('#save-gallery-btn').addEventListener('click', async (e) => {
+      const btn = e.currentTarget;
+      const originalContent = btn.innerHTML;
+      
+      try {
+        btn.disabled = true;
+        btn.innerHTML = '<span>⏳</span> Saving...';
+        btn.style.opacity = '0.7';
+        
+        // Let UI update
+        await new Promise(r => setTimeout(r, 100));
+        
+        const dataUrl = canvas.toDataURL('image/png');
+        
+        // Find a representative domain
+        // Use the domain from the first assigned screenshot
+        let domain = 'Showcase';
+        const assignments = Object.values(state.assignments);
+        if (assignments.length > 0 && assignments[0] && assignments[0].domain) {
+          domain = assignments[0].domain;
+        } else if (state.customItems.length > 0 && state.customItems[0].img && state.customItems[0].img.domain) {
+          domain = state.customItems[0].img.domain;
+        }
+
+        const timestamp = Date.now();
+        const filename = `Showcase_${domain.replace(/[^a-z0-9]/gi, '_')}_${timestamp}.png`;
+
+        await db.add({
+          filename,
+          domain,
+          device: 'showcase',
+          captureType: 'showcase',
+          dataUrl: dataUrl,
+          timestamp: timestamp,
+          url: 'Showcase'
+        });
+        
+        btn.innerHTML = '<span>✅</span> Saved!';
+        
+        // Refresh the gallery in the background
+        if (typeof loadScreenshots === 'function') {
+           loadScreenshots();
+        }
+
+        setTimeout(() => {
+          btn.innerHTML = originalContent;
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 2000);
+      } catch (err) {
+        console.error(err);
+        btn.innerHTML = '<span>❌</span> Error';
+        setTimeout(() => {
+          btn.innerHTML = originalContent;
+          btn.disabled = false;
+          btn.style.opacity = '1';
+        }, 2000);
+      }
+    });
+
     // Download Image
     overlay.querySelector('#download-btn').addEventListener('click', async (e) => {
       const btn = e.currentTarget;
@@ -2193,6 +2498,18 @@ const db = {
       const tx = db.transaction(this.storeName, 'readwrite');
       const store = tx.objectStore(this.storeName);
       const request = store.delete(id);
+      
+      request.onerror = () => reject(request.error);
+      request.onsuccess = () => resolve();
+    });
+  },
+
+  async update(screenshot) {
+    const db = await this.open();
+    return new Promise((resolve, reject) => {
+      const tx = db.transaction(this.storeName, 'readwrite');
+      const store = tx.objectStore(this.storeName);
+      const request = store.put(screenshot);
       
       request.onerror = () => reject(request.error);
       request.onsuccess = () => resolve();
