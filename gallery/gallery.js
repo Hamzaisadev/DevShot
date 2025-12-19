@@ -758,7 +758,7 @@ document.addEventListener('DOMContentLoaded', () => {
     const state = {
       assignments: {}, // { 0: screenshot, 1: screenshot }
       available: hasMoreAvailable ? initialScreenshots : [...initialScreenshots], 
-      template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : 'hero-layout'),
+      template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : 'surface-display'),
       background: { type: 'gradient', value: ['#1a1a2e', '#0f3460'] },
       zoom: 0.8, // Start zoomed out slightly to see whole canvas
       customItems: [],
@@ -984,6 +984,7 @@ document.addEventListener('DOMContentLoaded', () => {
       { id: 'macbook-pro-16', name: 'MacBook Pro 16"', icon: '💻' },
       { id: 'macbook-air', name: 'MacBook Air', icon: '💻' },
       { id: 'imac-24', name: 'iMac 24"', icon: '🖥️' },
+      { id: 'desktop-monitor', name: 'Desktop Monitor', icon: '🖥️' },
       { type: 'header', name: 'Browsers' },
       { id: 'browser-arc', name: 'Arc Browser', icon: '🌐' },
       { id: 'browser-chrome', name: 'Chrome', icon: '🌐' },
@@ -1572,7 +1573,93 @@ document.addEventListener('DOMContentLoaded', () => {
         drawGridItem(3, padding*2 + w, padding*2 + h);
       }
       
-      // --- NEW TEXT TEMPLATES ---
+      // --- PROFESSIONAL DEVICE MOCKUPS (New) ---
+      
+      // Surface Display: 3 devices sitting on a reflective surface
+      else if (state.template === 'surface-display') {
+        // Draw reflective surface/shadow at bottom
+        ctx.save();
+        const gradient = ctx.createLinearGradient(0, 800, 0, 1080);
+        gradient.addColorStop(0, 'rgba(0,0,0,0)');
+        gradient.addColorStop(1, 'rgba(0,0,0,0.3)');
+        ctx.fillStyle = gradient;
+        ctx.fillRect(0, 800, 1920, 280);
+        ctx.restore();
+        
+        // Draw devices - tablet left, desktop center, phone right
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 380, 520, 400);
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 480, 900);
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1520, 580, 280);
+      }
+      
+      // Multi-Device Showcase: 5 devices in professional arrangement
+      else if (state.template === 'multi-device-showcase') {
+        // Background glow effect
+        ctx.save();
+        const glow = ctx.createRadialGradient(960, 540, 0, 960, 540, 800);
+        glow.addColorStop(0, 'rgba(99,102,241,0.15)');
+        glow.addColorStop(1, 'rgba(99,102,241,0)');
+        ctx.fillStyle = glow;
+        ctx.fillRect(0, 0, 1920, 1080);
+        ctx.restore();
+        
+        // Back row: Desktop monitor (center-back)
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 380, 800);
+        
+        // Middle row: Laptop
+        if(loaded[1]) {
+          ctx.save();
+          ctx.translate(500, 580);
+          ctx.rotate(-0.05);
+          drawDevice(ctx, getSlotDevice(1), loaded[1], 0, 0, 650);
+          ctx.restore();
+        }
+        
+        // Tablet on right
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1400, 560, 350);
+        
+        // Front row: Two phones
+        if(loaded[3]) drawDevice(ctx, getSlotDevice(3), loaded[3], 1100, 700, 220);
+        if(loaded[4]) drawDevice(ctx, getSlotDevice(4), loaded[4], 1550, 680, 200);
+      }
+      
+      // Angled Laptop: Single minimalist laptop at angle
+      else if (state.template === 'angled-laptop') {
+        if(loaded[0]) {
+          ctx.save();
+          // Subtle shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.4)';
+          ctx.shadowBlur = 80;
+          ctx.shadowOffsetY = 40;
+          ctx.shadowOffsetX = -20;
+          
+          // Slight rotation for dramatic effect
+          ctx.translate(960, 540);
+          ctx.rotate(-0.08);
+          drawDevice(ctx, getSlotDevice(0), loaded[0], 0, 0, 1200);
+          ctx.restore();
+        }
+      }
+      
+      // iMac Spotlight: Single iMac/monitor at dramatic angle
+      else if (state.template === 'imac-spotlight') {
+        if(loaded[0]) {
+          ctx.save();
+          // Dramatic shadow
+          ctx.shadowColor = 'rgba(0,0,0,0.5)';
+          ctx.shadowBlur = 100;
+          ctx.shadowOffsetY = 50;
+          ctx.shadowOffsetX = 30;
+          
+          // Tilt for spotlight effect
+          ctx.translate(960, 520);
+          ctx.rotate(0.06);
+          drawDevice(ctx, getSlotDevice(0), loaded[0], 0, 0, 1100);
+          ctx.restore();
+        }
+      }
+      
+      // --- TEXT TEMPLATES ---
       
       else if (state.template === 'social-post') {
           // Left: Image, Right: Text
@@ -2109,6 +2196,8 @@ document.addEventListener('DOMContentLoaded', () => {
     const isPhone = deviceId.includes('phone') || deviceId.includes('pixel') || deviceId.includes('samsung');
     const isLaptop = deviceId.includes('macbook') || deviceId.includes('laptop');
     const isBrowser = deviceId.includes('browser');
+    const isIMac = deviceId.includes('imac');
+    const isDesktop = deviceId.includes('desktop') || deviceId.includes('monitor');
     
     // Calculate Height
     const aspectRatio = img.height / img.width;
@@ -2204,6 +2293,99 @@ document.addEventListener('DOMContentLoaded', () => {
       // Notch Detail
       ctx.fillStyle = '#000';
       roundRect(ctx, cx - 40, cy - h/2 + bezel, 80, 10, {tl: 0, tr: 0, bl: 5, br: 5});
+      ctx.fill();
+      
+      ctx.restore();
+    }
+    // --- iMac ---
+    else if (isIMac) {
+      h = width * 0.62; // iMac aspect ratio
+      const bezel = width * 0.02; // Thin bezels
+      const chinHeight = width * 0.04; // Signature iMac chin
+      const standWidth = width * 0.25;
+      const standHeight = width * 0.08;
+      
+      ctx.save();
+      applyShadow(60, 30);
+      
+      // Main display body
+      ctx.fillStyle = '#e5e5e7'; // Silver aluminum
+      roundRect(ctx, cx - width/2, cy - h/2 - chinHeight/2, width, h + chinHeight, 20);
+      ctx.fill();
+      
+      // Screen (black border then image)
+      ctx.fillStyle = '#000';
+      roundRect(ctx, cx - width/2 + bezel, cy - h/2 - chinHeight/2 + bezel, width - bezel*2, h - bezel, 10);
+      ctx.fill();
+      
+      // Image on screen
+      ctx.save();
+      roundRect(ctx, cx - width/2 + bezel*2, cy - h/2 - chinHeight/2 + bezel*2, width - bezel*4, h - bezel*3, 6);
+      ctx.clip();
+      ctx.drawImage(img, cx - width/2 + bezel*2, cy - h/2 - chinHeight/2 + bezel*2, width - bezel*4, h - bezel*3);
+      ctx.restore();
+      
+      // Chin (Apple logo area)
+      ctx.fillStyle = '#d1d1d6';
+      roundRect(ctx, cx - width/2, cy + h/2 - chinHeight/2 - bezel, width, chinHeight + bezel, {tl: 0, tr: 0, bl: 20, br: 20});
+      ctx.fill();
+      
+      // Stand
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = '#c7c7cc';
+      ctx.beginPath();
+      ctx.moveTo(cx - standWidth/2, cy + h/2 + chinHeight/2);
+      ctx.lineTo(cx + standWidth/2, cy + h/2 + chinHeight/2);
+      ctx.lineTo(cx + standWidth*0.7, cy + h/2 + chinHeight/2 + standHeight);
+      ctx.lineTo(cx - standWidth*0.7, cy + h/2 + chinHeight/2 + standHeight);
+      ctx.closePath();
+      ctx.fill();
+      
+      // Stand base
+      ctx.fillStyle = '#b8b8bd';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + h/2 + chinHeight/2 + standHeight + 5, standWidth*0.8, 8, 0, 0, Math.PI * 2);
+      ctx.fill();
+      
+      ctx.restore();
+    }
+    // --- Desktop PC Monitor ---
+    else if (isDesktop) {
+      h = width * 0.6; // Monitor aspect ratio (16:10 ish)
+      const bezel = width * 0.025;
+      const standNeckWidth = width * 0.08;
+      const standNeckHeight = width * 0.1;
+      const standBaseWidth = width * 0.35;
+      
+      ctx.save();
+      applyShadow(50, 25);
+      
+      // Monitor body
+      ctx.fillStyle = '#2c2c2e'; // Dark gray
+      roundRect(ctx, cx - width/2, cy - h/2, width, h, 8);
+      ctx.fill();
+      
+      // Screen border
+      ctx.fillStyle = '#000';
+      roundRect(ctx, cx - width/2 + bezel/2, cy - h/2 + bezel/2, width - bezel, h - bezel*1.5, 4);
+      ctx.fill();
+      
+      // Image on screen
+      ctx.save();
+      roundRect(ctx, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2.5, 2);
+      ctx.clip();
+      ctx.drawImage(img, cx - width/2 + bezel, cy - h/2 + bezel, width - bezel*2, h - bezel*2.5);
+      ctx.restore();
+      
+      // Stand neck
+      ctx.shadowColor = 'transparent';
+      ctx.fillStyle = '#3c3c3e';
+      ctx.fillRect(cx - standNeckWidth/2, cy + h/2, standNeckWidth, standNeckHeight);
+      
+      // Stand base
+      ctx.fillStyle = '#2c2c2e';
+      ctx.beginPath();
+      ctx.ellipse(cx, cy + h/2 + standNeckHeight + 5, standBaseWidth/2, 12, 0, 0, Math.PI * 2);
       ctx.fill();
       
       ctx.restore();

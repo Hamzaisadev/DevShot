@@ -1,6 +1,6 @@
 # DevShot - The Ultimate Screenshot & Mockup Tool for Developers
 
-![DevShot Banner](website/public/og-image.jpg)
+![DevShot Banner](https://raw.githubusercontent.com/Hamzaisadev/DevShot/main/website/public/og-image.jpg)
 
 **DevShot** is a professional, open-source Chrome extension designed specifically for web developers, designers, and digital agencies. It goes beyond simple screenshots by offering a complete suite of tools to capture, mock up, and showcase your work.
 
