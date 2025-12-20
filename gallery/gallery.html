@@ -8,112 +8,138 @@
 </head>
 <body>
   <div class="app">
-    <!-- Header -->
+    <!-- Premium Header -->
     <header class="header">
       <div class="header-left">
-        <img src="../icons/icon-128.png" alt="DevShot" class="logo-img">
-        <h1 class="logo-text">DevShot</h1>
+        <div class="brand">
+          <div class="brand-logo">
+            <img src="../icons/icon-128.png" alt="DevShot">
+          </div>
+          <div class="brand-info">
+            <h1 class="logo-text">DevShot</h1>
+            <span class="badge-beta">Gallery</span>
+          </div>
+        </div>
       </div>
+      
+      <div class="header-center">
+        <div class="search-wrapper">
+          <span class="search-icon">🔍</span>
+          <input type="text" id="gallery-search" placeholder="Search screenshots..." class="search-input">
+        </div>
+      </div>
+
       <div class="header-right">
-        <button class="btn btn-secondary" id="btn-refresh">
-          <span>🔄</span> Refresh
+        <button class="btn btn-secondary btn-icon-only" id="btn-refresh" title="Refresh Gallery">
+          <span>🔄</span>
         </button>
-        <button class="btn btn-danger" id="btn-clear-all" title="Delete all screenshots">
+        <button class="btn btn-primary" id="btn-batch-capture">
+          <span>📷</span> Batch Capture
+        </button>
+        <button class="btn btn-danger btn-ghost" id="btn-clear-all">
           <span>🗑️</span> Clear All
-        </button>
-        <button class="btn btn-primary" id="btn-download-all">
-          <span>📥</span> Download All
         </button>
       </div>
     </header>
 
-    <!-- Sub-Header for Bulk Actions -->
-    <div class="sub-header">
-      <div class="sub-header-left">
-        <button class="btn btn-sm btn-secondary" id="btn-expand-all">📂 Expand All</button>
-        <button class="btn btn-sm btn-secondary" id="btn-collapse-all">📁 Collapse All</button>
+    <!-- Navigation & Filters -->
+    <nav class="nav-bar">
+      <div class="nav-left">
+        <div class="nav-tabs">
+          <button class="nav-tab active" data-filter="">All Assets</button>
+          <button class="nav-tab" data-filter="viewport">Viewports</button>
+          <button class="nav-tab" data-filter="fullpage">Full Pages</button>
+          <button class="nav-tab" data-filter="showcase">Showcases</button>
+          <button class="nav-tab" data-filter="video">Videos</button>
+        </div>
       </div>
-      <div class="sub-header-right">
+      
+      <div class="nav-right">
+        <div class="filter-group">
+          <select class="minimal-select" id="filter-domain">
+            <option value="">All Domains</option>
+          </select>
+          <select class="minimal-select" id="sort-order">
+            <option value="date-desc">Newest First</option>
+            <option value="date-asc">Oldest First</option>
+            <option value="name-asc">A-Z</option>
+          </select>
+        </div>
+        <div class="view-switcher">
+          <button class="view-btn active" id="view-grid" title="Grid View">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
+          </button>
+          <button class="view-btn" id="view-list" title="List View">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="21" y2="6"></line><line x1="8" y1="12" x2="21" y2="12"></line><line x1="8" y1="18" x2="21" y2="18"></line><line x1="3" y1="6" x2="3.01" y2="6"></line><line x1="3" y1="12" x2="3.01" y2="12"></line><line x1="3" y1="18" x2="3.01" y2="18"></line></svg>
+          </button>
+        </div>
+      </div>
+    </nav>
+
+    <!-- Stats Bar -->
+    <div class="stats-bar">
+      <div class="stats-left">
         <span id="gallery-stats">Total: 0 screenshots</span>
       </div>
-    </div>
-
-    <!-- Toolbar -->
-    <div class="toolbar">
-      <div class="toolbar-left">
-        <label class="checkbox-label">
-          <input type="checkbox" id="select-all">
-          <span>Select All</span>
-        </label>
-        <button class="btn btn-sm btn-danger" id="btn-delete-selected" disabled>
-          <span>🗑️</span> Delete Selected
-        </button>
-        <button class="btn btn-sm btn-secondary" id="btn-download-selected" disabled>
-          <span>📥</span> Download Selected
-        </button>
-        <button class="btn btn-sm btn-accent" id="btn-batch-capture">
-          <span>📷</span> Batch Capture
-        </button>
-        <button class="btn btn-sm btn-primary" id="btn-create-showcase" disabled title="Select 3 screenshots (desktop, tablet, mobile)">
-          <span>🖼️</span> Create Showcase
-        </button>
-        <button class="btn btn-sm btn-secondary" id="btn-export-pdf" disabled>
-          <span>📄</span> Export PDF
-        </button>
-      </div>
-      <div class="toolbar-right">
-        <div class="search-box">
-          <input type="text" id="gallery-search" placeholder="Search by name or domain..." class="input">
-        </div>
-        <select class="select" id="sort-order">
-          <option value="date-desc">Newest First</option>
-          <option value="date-asc">Oldest First</option>
-          <option value="name-asc">Name (A-Z)</option>
-          <option value="name-desc">Name (Z-A)</option>
-        </select>
-        <select class="select" id="filter-domain">
-          <option value="">All Domains</option>
-        </select>
-        <select class="select" id="filter-type">
-          <option value="">All Types</option>
-          <option value="viewport">Viewport</option>
-          <option value="fullpage">Full Page</option>
-          <option value="showcase">Showcase</option>
-        </select>
-        <select class="select" id="filter-device">
-          <option value="">All Devices</option>
-          <option value="desktop">Desktop</option>
-          <option value="mobile">Mobile</option>
-          <option value="tablet">Tablet</option>
-        </select>
-        <div class="view-toggles">
-          <button class="btn btn-icon active" id="view-grid" title="Grid View">📱</button>
-          <button class="btn btn-icon" id="view-list" title="List View">≡</button>
-        </div>
+      <div class="stats-right">
+        <button class="text-btn" id="btn-expand-all">Expand All</button>
+        <button class="text-btn" id="btn-collapse-all">Collapse All</button>
       </div>
     </div>
 
     <!-- Gallery Content -->
     <main class="gallery-container">
-      <!-- Domain groups will be dynamically inserted here -->
       <div class="empty-state" id="empty-state">
-        <div class="empty-icon">📷</div>
-        <h2>No Screenshots Yet</h2>
-        <p>Take your first screenshot using the DevShot popup or right-click menu.</p>
+        <div class="empty-illustration">
+          <div class="circle-glow"></div>
+          <span class="empty-emoji">📷</span>
+        </div>
+        <h2>Your gallery is empty</h2>
+        <p>Capture websites in any format and they'll appear here automatically.</p>
+        <button class="btn btn-primary" onclick="window.close()">Start Capturing</button>
       </div>
     </main>
 
+    <!-- Floating Action Bar (Selection) -->
+    <div class="selection-bar" id="selection-bar">
+      <div class="selection-info">
+        <span class="selection-count">0 items selected</span>
+      </div>
+      <div class="selection-actions">
+        <button class="btn btn-secondary" id="btn-create-showcase">
+          <span>🖼️</span> Showcase
+        </button>
+        <button class="btn btn-secondary" id="btn-export-pdf">
+          <span>📄</span> PDF Export
+        </button>
+        <button class="btn btn-secondary" id="btn-download-selected">
+          <span>📥</span> Download
+        </button>
+        <div class="divider"></div>
+        <button class="btn btn-danger" id="btn-delete-selected">
+          <span>🗑️</span> Delete
+        </button>
+      </div>
+      <button class="btn-clear-selection" id="btn-clear-selection" title="Clear Selection">
+        &times;
+      </button>
+    </div>
+
     <!-- Footer -->
     <footer class="footer">
-      <div class="footer-links">
-        <a href="https://github.com/Hamzaisadev/DevShot" target="_blank" class="star-btn-large">
-          ⭐ Star on GitHub
-        </a>
-        <a href="https://buymeacoffee.com/albatix" target="_blank" class="support-btn-large">
-          ☕ Buy Me Coffee
-        </a>
+      <div class="footer-content">
+        <div class="footer-left">
+          <p>© 2025 DevShot • Premium Pro Edition</p>
+        </div>
+        <div class="footer-center">
+            <a href="https://github.com/Hamzaisadev/DevShot" target="_blank" class="footer-link">GitHub</a>
+            <span class="dot"></span>
+            <a href="https://buymeacoffee.com/albatix" target="_blank" class="footer-link">Support</a>
+        </div>
+        <div class="footer-right">
+          <p>Made by Albatix</p>
+        </div>
       </div>
-      <p class="footer-credit">DevShot v2.0 • Made by Albatix with ❤️</p>
     </footer>
   </div>
 

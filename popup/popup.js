@@ -3,12 +3,6 @@ document.addEventListener('DOMContentLoaded', () => {
   const $ = id => document.getElementById(id);
   
   const btns = {
-    viewport: $('btn-viewport'),
-    fullpage: $('btn-fullpage'),
-    mobileViewport: $('btn-mobile-viewport'),
-    mobileFullpage: $('btn-mobile-fullpage'),
-    tabletViewport: $('btn-tablet-viewport'),
-    tabletFullpage: $('btn-tablet-fullpage'),
     bundle: $('btn-bundle'),
     batchUrls: $('btn-batch-urls'),
     gallery: $('btn-gallery'),
@@ -18,6 +12,12 @@ document.addEventListener('DOMContentLoaded', () => {
   const statusEl = $('status');
   const delaySelect = $('delay-select');
   let busy = false;
+  const selectedTiles = new Set(['desktop-viewport', 'mobile-viewport']); // Default selection
+
+  // Grid elements
+  const captureGrid = $('capture-grid');
+  const multiCount = $('multi-count');
+  const tiles = document.querySelectorAll('.tile');
 
   // Batch modal elements
   const batchModal = $('batch-modal');
@@ -52,17 +52,63 @@ document.addEventListener('DOMContentLoaded', () => {
   function setDisabled(disabled) {
     busy = disabled;
     Object.values(btns).forEach(b => {
-      if (b !== btns.gallery && b !== btns.batchUrls) b.disabled = disabled;
+      if (b !== btns.gallery) b.disabled = disabled;
     });
   }
 
-  async function capture(type, btn) {
+  function updateSelectedCount() {
+    if (multiCount) multiCount.textContent = selectedTiles.size;
+    btns.bundle.disabled = selectedTiles.size === 0;
+  }
+
+  // Pre-select defaults
+  tiles.forEach(tile => {
+    if (selectedTiles.has(tile.dataset.type)) {
+      tile.classList.add('selected');
+    }
+  });
+  updateSelectedCount();
+
+  // Tile Clicks (Always Toggle)
+  tiles.forEach(tile => {
+    tile.addEventListener('click', () => {
+      if (busy) return;
+      toggleTile(tile, tile.dataset.type);
+    });
+  });
+
+  function toggleTile(tile, type) {
+    if (selectedTiles.has(type)) {
+      selectedTiles.delete(type);
+      tile.classList.remove('selected');
+    } else {
+      selectedTiles.add(type);
+      tile.classList.add('selected');
+    }
+    updateSelectedCount();
+  }
+
+  $('multi-select-all').addEventListener('click', () => {
+    if (busy) return;
+    tiles.forEach(tile => {
+      selectedTiles.add(tile.dataset.type);
+      tile.classList.add('selected');
+    });
+    updateSelectedCount();
+  });
+
+  $('multi-select-none').addEventListener('click', () => {
+    if (busy) return;
+    selectedTiles.clear();
+    tiles.forEach(tile => tile.classList.remove('selected'));
+    updateSelectedCount();
+  });
+
+  async function capture(type, tileEl) {
     if (busy) return;
     setDisabled(true);
     
-    // Add loading spinner to the clicked button
-    btn.classList.add('btn-loading');
-    
+    tileEl.classList.add('btn-loading');
     const delay = getDelay();
     showStatus(delay > 0 ? `Waiting ${delay/1000}s...` : 'Capturing...', 'loading');
     
@@ -74,36 +120,68 @@ document.addEventListener('DOMContentLoaded', () => {
     }
     
     btn.classList.remove('btn-loading');
+    tileEl.classList.remove('btn-loading');
     setDisabled(false);
   }
 
-
   async function captureAll() {
     if (busy) return;
+    const types = Array.from(selectedTiles);
+    if (types.length === 0) return;
+
     setDisabled(true);
     btns.bundle.classList.add('btn-loading');
     
-    const types = ['desktop-viewport', 'desktop-fullpage', 'mobile-viewport', 'mobile-fullpage', 'tablet-viewport', 'tablet-fullpage'];
     const delay = getDelay();
-    
-    for (let i = 0; i < types.length; i++) {
-      showStatus(`Capturing ${i + 1}/6...`, 'loading');
-      try {
-        await chrome.runtime.sendMessage({ action: 'capture', type: types[i], delay });
-      } catch (e) {
-        console.error(e);
-      }
-      if (i < types.length - 1) await new Promise(r => setTimeout(r, 800));
+    const tab = await getCurrentTab();
+    if (!tab || !tab.url) {
+      showStatus('No active tab found', 'error');
+      setDisabled(false);
+      btns.bundle.classList.remove('btn-loading');
+      return;
     }
-    
-    btns.bundle.classList.remove('btn-loading');
-    showStatus('✓ All 6 saved!', 'success');
-    setDisabled(false);
+
+    showStatus('Pre-authorizing video...', 'loading');
+
+    // Listener for progress updates from service worker
+    const progressListener = (message) => {
+      if (message.action === 'batchProgressUpdate') {
+        showStatus(`Capturing ${message.current}/${message.total}...`, 'loading');
+      }
+    };
+    chrome.runtime.onMessage.addListener(progressListener);
+
+    try {
+      const res = await chrome.runtime.sendMessage({
+        action: 'omniBatchCapture',
+        urls: [tab.url],
+        types: types,
+        delay: delay
+      });
+      
+      if (res?.success) {
+        showStatus(`✓ Assets saved to gallery!`, 'success');
+      } else {
+        showStatus('Capture failed', 'error');
+      }
+    } catch (e) {
+      console.error('Multi-capture error:', e);
+      showStatus('Connection error', 'error');
+    } finally {
+      chrome.runtime.onMessage.removeListener(progressListener);
+      btns.bundle.classList.remove('btn-loading');
+      setDisabled(false);
+    }
   }
 
 
   // Batch URLs Modal
   function showBatchModal() {
+    console.log('Opening Batch Modal');
+    if (!batchModal) {
+        console.error('Batch Modal element not found!');
+        return;
+    }
     batchModal.classList.add('show');
     batchProgress.innerHTML = '';
     batchStart.disabled = false;
@@ -132,16 +210,23 @@ document.addEventListener('DOMContentLoaded', () => {
       .filter(url => url !== null);
   }
 
-  // Get selected capture types from checkboxes
+  // Get selected capture types from checkboxes (either modal) or tiles (main)
   function getSelectedCaptureTypes() {
-    const types = [];
-    if ($('cb-desktop-viewport')?.checked) types.push('desktop-viewport');
-    if ($('cb-desktop-fullpage')?.checked) types.push('desktop-fullpage');
-    if ($('cb-mobile-viewport')?.checked) types.push('mobile-viewport');
-    if ($('cb-mobile-fullpage')?.checked) types.push('mobile-fullpage');
-    if ($('cb-tablet-viewport')?.checked) types.push('tablet-viewport');
-    if ($('cb-tablet-fullpage')?.checked) types.push('tablet-fullpage');
-    return types;
+    // If modal is show, use modal checkboxes
+    if (batchModal.classList.contains('show')) {
+      const types = [];
+      if ($('cb-desktop-viewport')?.checked) types.push('desktop-viewport');
+      if ($('cb-desktop-fullpage')?.checked) types.push('desktop-fullpage');
+      if ($('cb-mobile-viewport')?.checked) types.push('mobile-viewport');
+      if ($('cb-mobile-fullpage')?.checked) types.push('mobile-fullpage');
+      if ($('cb-tablet-viewport')?.checked) types.push('tablet-viewport');
+      if ($('cb-tablet-fullpage')?.checked) types.push('tablet-fullpage');
+      if ($('cb-video')?.checked) types.push('video');
+      return types;
+    } else {
+      // Use main UI selected tiles
+      return Array.from(selectedTiles);
+    }
   }
 
   // Quick select buttons
@@ -152,6 +237,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('cb-mobile-fullpage').checked = true;
     $('cb-tablet-viewport').checked = true;
     $('cb-tablet-fullpage').checked = true;
+    if ($('cb-video')) $('cb-video').checked = true;
   });
 
   $('select-viewports')?.addEventListener('click', () => {
@@ -161,6 +247,7 @@ document.addEventListener('DOMContentLoaded', () => {
     $('cb-mobile-fullpage').checked = false;
     $('cb-tablet-viewport').checked = true;
     $('cb-tablet-fullpage').checked = false;
+    if ($('cb-video')) $('cb-video').checked = false;
   });
 
   $('select-none')?.addEventListener('click', () => {
@@ -168,9 +255,11 @@ document.addEventListener('DOMContentLoaded', () => {
     $('cb-desktop-fullpage').checked = false;
     $('cb-mobile-viewport').checked = false;
     $('cb-mobile-fullpage').checked = false;
-    $('cb-tablet-viewport').checked = false;
-    $('cb-tablet-fullpage').checked = false;
+    if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = false;
+    if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = false;
+    if ($('cb-video')) $('cb-video').checked = false;
   });
+
 
   async function startBatchCapture() {
     const urls = parseUrls(batchUrlsInput.value);
@@ -187,68 +276,64 @@ document.addEventListener('DOMContentLoaded', () => {
     }
 
     const delay = getDelay();
-    const totalCaptures = urls.length * captureTypes.length;
     
     batchStart.disabled = true;
-    batchStart.textContent = '⏳ Capturing...';
-    batchProgress.innerHTML = '';
+    batchStart.textContent = '⏳ Authorizing...';
+    batchProgress.innerHTML = '<span style="color:var(--text-dim)">Pre-authorizing video captures...</span>';
 
-    let success = 0, failed = 0, current = 0;
-
-    for (let i = 0; i < urls.length; i++) {
-      const url = urls[i];
-      const hostname = new URL(url).hostname;
-      
-      for (let j = 0; j < captureTypes.length; j++) {
-        current++;
-        const captureType = captureTypes[j];
-        
-        batchProgress.innerHTML = `<span>Capturing ${current}/${totalCaptures}: ${hostname} (${captureType})...</span>`;
-
-        try {
-          const res = await chrome.runtime.sendMessage({
-            action: 'batchCaptureUrl',
-            url: url,
-            type: captureType,
-            delay: delay // Apply full delay to every capture for proper page loading
-          });
-          
-          if (res?.success) {
-            success++;
-          } else {
-            failed++;
-          }
-        } catch (e) {
-          failed++;
-        }
-
-        // Wait between captures
-        if (current < totalCaptures) {
-          await new Promise(r => setTimeout(r, 1000));
+    // Set up progress listener
+    const progressListener = (message) => {
+      if (message.action === 'batchProgressUpdate') {
+        const { current, total, url, type } = message;
+        const hostname = new URL(url).hostname;
+        batchProgress.innerHTML = `<span>Capturing ${current}/${total}: ${hostname} (${type})...</span>`;
+        if (current === total) {
+           batchStart.textContent = '⏳ Saving...';
+        } else {
+           batchStart.textContent = '⏳ Processing...';
         }
       }
-    }
+    };
+    chrome.runtime.onMessage.addListener(progressListener);
 
-    batchProgress.innerHTML = `<span style="color:#10b981">✓ Done! ${success}/${totalCaptures} captured</span>`;
-    batchStart.textContent = '✓ Done';
-    
-    // Auto-close after 2s
-    setTimeout(() => {
-      hideBatchModal();
-    }, 2000);
+    try {
+      // Send consolidated batch request
+      const res = await chrome.runtime.sendMessage({
+        action: 'omniBatchCapture',
+        urls: urls,
+        types: captureTypes,
+        delay: delay
+      });
+      
+      if (res?.success) {
+        batchProgress.innerHTML = `<span style="color:#10b981">✓ Done! ${res.count}/${res.total} captured</span>`;
+        batchStart.textContent = '✓ Done';
+      } else {
+        batchProgress.innerHTML = `<span style="color:#ef4444">Error: ${res?.error || 'Batch failed'}</span>`;
+        batchStart.disabled = false;
+        batchStart.textContent = 'Start Capture';
+      }
+    } catch (e) {
+      console.error('Batch error:', e);
+      batchProgress.innerHTML = `<span style="color:#ef4444">Connection Error</span>`;
+      batchStart.disabled = false;
+      batchStart.textContent = 'Start Capture';
+    } finally {
+      chrome.runtime.onMessage.removeListener(progressListener);
+      // Auto-close after 3s
+      if (batchStart.textContent === '✓ Done') {
+        setTimeout(() => {
+          hideBatchModal();
+        }, 3000);
+      }
+    }
   }
 
   // Events
-  btns.viewport.onclick = () => capture('desktop-viewport', btns.viewport);
-  btns.fullpage.onclick = () => capture('desktop-fullpage', btns.fullpage);
-  btns.mobileViewport.onclick = () => capture('mobile-viewport', btns.mobileViewport);
-  btns.mobileFullpage.onclick = () => capture('mobile-fullpage', btns.mobileFullpage);
-  btns.tabletViewport.onclick = () => capture('tablet-viewport', btns.tabletViewport);
-  btns.tabletFullpage.onclick = () => capture('tablet-fullpage', btns.tabletFullpage);
-  btns.bundle.onclick = captureAll;
-  btns.batchUrls.onclick = showBatchModal;
-  btns.gallery.onclick = () => chrome.tabs.create({ url: chrome.runtime.getURL('gallery/gallery.html') });
-  btns.settings.onclick = () => chrome.tabs.create({ url: chrome.runtime.getURL('settings/settings.html') });
+  btns.bundle.addEventListener('click', captureAll);
+  btns.batchUrls.addEventListener('click', showBatchModal);
+  btns.gallery.addEventListener('click', () => chrome.tabs.create({ url: 'gallery/gallery.html' }));
+  btns.settings.addEventListener('click', () => chrome.runtime.openOptionsPage());
 
   batchClose.onclick = hideBatchModal;
   batchCancel.onclick = hideBatchModal;

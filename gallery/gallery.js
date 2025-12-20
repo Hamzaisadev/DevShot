@@ -1,89 +1,56 @@
-// DevShot Gallery Script
-// Manages screenshot storage, display, and bulk operations
-
 document.addEventListener('DOMContentLoaded', () => {
   // Elements
   const galleryContainer = document.querySelector('.gallery-container');
   const emptyState = document.getElementById('empty-state');
-  const selectAllCheckbox = document.getElementById('select-all');
+  const selectionBar = document.getElementById('selection-bar');
+  const selectionCount = selectionBar.querySelector('.selection-count');
+  const clearSelectionBtn = document.getElementById('btn-clear-selection');
+  
   const deleteSelectedBtn = document.getElementById('btn-delete-selected');
   const downloadSelectedBtn = document.getElementById('btn-download-selected');
   const batchCaptureBtn = document.getElementById('btn-batch-capture');
   const showcaseBtn = document.getElementById('btn-create-showcase');
-  const customCanvasBtn = document.getElementById('btn-custom-canvas');
   const exportPdfBtn = document.getElementById('btn-export-pdf');
-  const downloadAllBtn = document.getElementById('btn-download-all');
   const clearAllBtn = document.getElementById('btn-clear-all');
   const refreshBtn = document.getElementById('btn-refresh');
+  
   const filterDomain = document.getElementById('filter-domain');
-  const filterType = document.getElementById('filter-type');
-  const filterDevice = document.getElementById('filter-device');
+  const navTabs = document.querySelectorAll('.nav-tab');
+  const searchInput = document.getElementById('gallery-search');
+  const sortSelect = document.getElementById('sort-order');
+  const gridViewBtn = document.getElementById('view-grid');
+  const listViewBtn = document.getElementById('view-list');
 
   // State
   let screenshots = [];
   let selectedIds = new Set();
-  let lastSelectedId = null; // For shift-click selecting
+  let lastSelectedId = null; 
   let currentSort = 'date-desc';
   let searchQuery = '';
-  let viewMode = 'grid'; // 'grid' or 'list'
+  let activeFilter = ''; // From nav tabs
+  let viewMode = 'grid';
+  let collapsedDomains = new Set();
 
   // Initialize
   loadScreenshots();
 
   // Event listeners
   refreshBtn.addEventListener('click', loadScreenshots);
-  downloadAllBtn.addEventListener('click', downloadAll);
   clearAllBtn.addEventListener('click', clearAll);
+  clearSelectionBtn.addEventListener('click', () => {
+    selectedIds.clear();
+    updateSelectionState();
+    renderGallery();
+  });
   
-  // Refresh when window regains focus to show new captures
   window.addEventListener('focus', loadScreenshots);
-  selectAllCheckbox.addEventListener('change', toggleSelectAll);
   deleteSelectedBtn.addEventListener('click', deleteSelected);
   downloadSelectedBtn.addEventListener('click', downloadSelected);
   batchCaptureBtn.addEventListener('click', openBatchCaptureModal);
-  showcaseBtn.addEventListener('click', () => createShowcase(null)); // Global create
-  customCanvasBtn?.addEventListener('click', openCustomCanvasModal);
+  showcaseBtn.addEventListener('click', () => createShowcase(null));
   exportPdfBtn.addEventListener('click', exportPdf);
-  filterDomain.addEventListener('change', renderGallery);
-  filterType.addEventListener('change', renderGallery);
-  filterDevice.addEventListener('change', renderGallery);
   
-  // Keyboard Shortcuts
-  document.addEventListener('keydown', (e) => {
-    // Skip if user is typing in search or other inputs
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-
-    if (e.key === 'a' && (e.ctrlKey || e.metaKey)) {
-      e.preventDefault();
-      selectAllCheckbox.click();
-    }
-    if (e.key === 'Delete' || e.key === 'Backspace') {
-      if (selectedIds.size > 0) deleteSelected();
-    }
-    if (e.key === 'd' && selectedIds.size > 0) {
-      downloadSelected();
-    }
-    if (e.key === 'c' && selectedIds.size > 0) {
-       // Copy first selected if one, or alert
-       const first = screenshots.find(s => selectedIds.has(s.id));
-       if (first) {
-         const card = document.querySelector(`[data-id="${first.id}"]`);
-         const copyBtn = card?.querySelector('.btn-copy');
-         copyBtn?.click();
-       }
-    }
-    if (e.key === 'Escape') {
-      selectedIds.clear();
-      updateSelectionState();
-      renderGallery();
-    }
-  });
-
-  const sortSelect = document.getElementById('sort-order');
-  const searchInput = document.getElementById('gallery-search');
-  const gridViewBtn = document.getElementById('view-grid');
-  const listViewBtn = document.getElementById('view-list');
-
+  filterDomain.addEventListener('change', renderGallery);
   sortSelect.addEventListener('change', (e) => {
     currentSort = e.target.value;
     renderGallery();
@@ -92,6 +59,16 @@ document.addEventListener('DOMContentLoaded', () => {
   searchInput.addEventListener('input', (e) => {
     searchQuery = e.target.value.toLowerCase();
     renderGallery();
+  });
+
+  // Nav Tabs Filter
+  navTabs.forEach(tab => {
+    tab.addEventListener('click', () => {
+      navTabs.forEach(t => t.classList.remove('active'));
+      tab.classList.add('active');
+      activeFilter = tab.dataset.filter;
+      renderGallery();
+    });
   });
 
   gridViewBtn.addEventListener('click', () => {
@@ -111,11 +88,24 @@ document.addEventListener('DOMContentLoaded', () => {
   });
 
   document.getElementById('btn-expand-all').addEventListener('click', () => {
-    document.querySelectorAll('.domain-header.collapsed').forEach(h => h.click());
+    collapsedDomains.clear();
+    renderGallery();
   });
 
   document.getElementById('btn-collapse-all').addEventListener('click', () => {
-    document.querySelectorAll('.domain-header:not(.collapsed)').forEach(h => h.click());
+    const domains = new Set(screenshots.map(s => s.domain));
+    domains.forEach(d => collapsedDomains.add(d));
+    renderGallery();
+  });
+
+  // Keyboard Shortcuts
+  document.addEventListener('keydown', (e) => {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.key === 'Escape') {
+      selectedIds.clear();
+      updateSelectionState();
+      renderGallery();
+    }
   });
 
   // Load screenshots from IndexedDB
@@ -125,33 +115,14 @@ document.addEventListener('DOMContentLoaded', () => {
       screenshots = await db.getAll() || [];
       updateDomainFilter();
       renderGallery();
-      
-      // Update stats
-      const statsEl = document.getElementById('gallery-stats');
-      if (statsEl) {
-        const domains = new Set(screenshots.map(s => s.domain)).size;
-        statsEl.textContent = `Total: ${screenshots.length} assets across ${domains} sites`;
-      }
     } catch (error) {
       console.error('Failed to load screenshots:', error);
-      screenshots = [];
-      if (emptyState) {
-        emptyState.style.display = 'flex';
-        emptyState.innerHTML = `
-          <div style="text-align:center; color: #ef4444;">
-            <p style="font-size: 2rem;">⚠️</p>
-            <p>Failed to load gallery</p>
-            <p style="font-size: 0.8rem; opacity: 0.7;">${error.message}</p>
-            <button onclick="location.reload()" style="margin-top: 15px; padding: 8px 16px; background: #6366f1; color: white; border: none; border-radius: 6px; cursor: pointer;">Retry</button>
-          </div>
-        `;
-      }
     }
   }
 
-  // Update domain filter options
   function updateDomainFilter() {
     const domains = [...new Set(screenshots.map(s => s.domain))].sort();
+    const currentVal = filterDomain.value;
     filterDomain.innerHTML = '<option value="">All Domains</option>';
     domains.forEach(domain => {
       const option = document.createElement('option');
@@ -159,18 +130,17 @@ document.addEventListener('DOMContentLoaded', () => {
       option.textContent = domain;
       filterDomain.appendChild(option);
     });
+    filterDomain.value = currentVal;
   }
 
-  // Render gallery
   function renderGallery() {
-    // Clear existing content (except empty state)
-    const groups = galleryContainer.querySelectorAll('.domain-group');
-    groups.forEach(g => g.remove());
+    // Clear existing
+    const existingGroups = galleryContainer.querySelectorAll('.domain-group');
+    existingGroups.forEach(g => g.remove());
 
     // Apply filters
     let filtered = [...screenshots];
     
-    // Search
     if (searchQuery) {
       filtered = filtered.filter(s => 
         s.domain.toLowerCase().includes(searchQuery) || 
@@ -178,14 +148,16 @@ document.addEventListener('DOMContentLoaded', () => {
       );
     }
 
+    if (activeFilter) {
+      if (activeFilter === 'video') {
+        filtered = filtered.filter(s => s.captureType === 'video' || s.filename?.endsWith('.webm'));
+      } else {
+        filtered = filtered.filter(s => s.captureType === activeFilter);
+      }
+    }
+
     if (filterDomain.value) {
       filtered = filtered.filter(s => s.domain === filterDomain.value);
-    }
-    if (filterType.value) {
-      filtered = filtered.filter(s => s.captureType === filterType.value);
-    }
-    if (filterDevice.value) {
-      filtered = filtered.filter(s => s.device === filterDevice.value);
     }
 
     // Sort
@@ -193,33 +165,47 @@ document.addEventListener('DOMContentLoaded', () => {
       if (currentSort === 'date-desc') return b.timestamp - a.timestamp;
       if (currentSort === 'date-asc') return a.timestamp - b.timestamp;
       if (currentSort === 'name-asc') return a.filename.localeCompare(b.filename);
-      if (currentSort === 'name-desc') return b.filename.localeCompare(a.filename);
       return 0;
     });
 
-    // Show/hide empty state
     emptyState.style.display = filtered.length === 0 ? 'flex' : 'none';
-
     if (filtered.length === 0) return;
 
     // Group by domain
-    const grouped = filtered.reduce((acc, screenshot) => {
-      const domain = screenshot.domain;
-      if (!acc[domain]) acc[domain] = [];
-      acc[domain].push(screenshot);
+    const grouped = filtered.reduce((acc, s) => {
+      if (!acc[s.domain]) acc[s.domain] = [];
+      acc[s.domain].push(s);
       return acc;
     }, {});
 
-    // Render each domain group
-    Object.entries(grouped).forEach(([domain, domainScreenshots]) => {
-      const group = createDomainGroup(domain, domainScreenshots);
+    Object.entries(grouped).forEach(([domain, shots]) => {
+      const group = createDomainGroup(domain, shots);
       galleryContainer.appendChild(group);
     });
 
     updateSelectionState();
+    updateStats();
   }
 
-  // Create domain group element
+  function updateStats() {
+    const statsEl = document.getElementById('gallery-stats');
+    if (statsEl) {
+      const domains = new Set(screenshots.map(s => s.domain)).size;
+      statsEl.textContent = `${screenshots.length} assets • ${domains} domains`;
+    }
+  }
+
+  function updateSelectionState() {
+    const count = selectedIds.size;
+    if (count > 0) {
+      selectionBar.classList.add('active');
+      selectionCount.textContent = `${count} items selected`;
+      showcaseBtn.disabled = count < 2; // Allow showcase with 2+ items
+    } else {
+      selectionBar.classList.remove('active');
+    }
+  }
+
   function createDomainGroup(domain, domainScreenshots) {
     const group = document.createElement('div');
     group.className = 'domain-group';
@@ -229,15 +215,14 @@ document.addEventListener('DOMContentLoaded', () => {
       <div class="domain-header">
         <div class="domain-info">
           <input type="checkbox" class="group-checkbox" ${allSelected ? 'checked' : ''} title="Select all in group">
-          <span class="domain-icon">📁</span>
+          <span class="domain-icon">🏠</span>
           <span class="domain-name">${domain}</span>
           <span class="domain-count">${domainScreenshots.length}</span>
         </div>
         <div class="domain-actions">
-          <button class="btn btn-sm btn-secondary domain-copy-urls-btn" title="Copy all URLs in group">🔗 URLs</button>
-          <button class="btn btn-sm btn-secondary domain-download-zip-btn" title="Download All as ZIP">📦 ZIP</button>
-          <button class="btn btn-sm btn-primary domain-showcase-btn" title="Create Showcase">🖼️ Showcase</button>
-          <span class="domain-toggle">▼</span>
+          <button class="btn btn-secondary btn-ghost domain-copy-urls-btn" title="Copy URLs">🔗</button>
+          <button class="btn btn-secondary btn-ghost domain-download-zip-btn" title="Download ZIP">📦</button>
+          <button class="btn btn-secondary btn-ghost domain-showcase-btn" title="Create Showcase">🖼️</button>
         </div>
       </div>
       <div class="screenshot-grid ${viewMode === 'list' ? 'list-view' : ''}"></div>
@@ -250,68 +235,64 @@ document.addEventListener('DOMContentLoaded', () => {
     const zipBtn = header.querySelector('.domain-download-zip-btn');
     const copyUrlsBtn = header.querySelector('.domain-copy-urls-btn');
 
-    // Group checkbox selection
     groupCheckbox.addEventListener('click', (e) => {
       e.stopPropagation();
       const checked = groupCheckbox.checked;
       domainScreenshots.forEach(s => toggleSelect(s.id, checked));
-      renderGallery(); // Re-render to update badges/checkboxes
     });
 
-    // Copy all URLs
     copyUrlsBtn.addEventListener('click', (e) => {
       e.stopPropagation();
       const urls = domainScreenshots.map(s => s.url).filter(u => u && u !== 'Showcase').join('\n');
       if (urls) {
         navigator.clipboard.writeText(urls);
-        const originalText = copyUrlsBtn.innerHTML;
-        copyUrlsBtn.innerHTML = '✅ Copied';
-        setTimeout(() => copyUrlsBtn.innerHTML = originalText, 2000);
+        copyUrlsBtn.innerHTML = '✅';
+        setTimeout(() => copyUrlsBtn.innerHTML = '🔗', 2000);
       }
     });
 
-    // Download all as ZIP
-    zipBtn.addEventListener('click', async (e) => {
+    zipBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      await downloadDomainAsZip(domain, domainScreenshots, zipBtn);
+      const currentSelectionInGroup = domainScreenshots.filter(s => selectedIds.has(s.id));
+      const targets = currentSelectionInGroup.length > 0 ? currentSelectionInGroup : domainScreenshots;
+      downloadDomainAsZip(domain, targets, zipBtn);
     });
 
-    // Open showcase modal for this domain
     showcaseBtn.addEventListener('click', (e) => {
       e.stopPropagation();
-      // Pass all domain screenshots as available options
-      openShowcaseModal(domainScreenshots, true, 'default');
+      const currentSelectionInGroup = domainScreenshots.filter(s => selectedIds.has(s.id));
+      const targets = currentSelectionInGroup.length > 0 ? currentSelectionInGroup : domainScreenshots;
+      openShowcaseModal(targets, true, 'default');
     });
 
-    // Toggle collapse
+    const isCollapsed = collapsedDomains.has(domain);
+    if (isCollapsed) {
+      header.classList.add('collapsed');
+      grid.style.display = 'none';
+    }
+
     header.addEventListener('click', (e) => {
       if (e.target.closest('.domain-actions') || e.target.classList.contains('group-checkbox')) return;
+      
+      const becomingCollapsed = !header.classList.contains('collapsed');
       header.classList.toggle('collapsed');
       grid.style.display = header.classList.contains('collapsed') ? 'none' : (viewMode === 'grid' ? 'grid' : 'flex');
+      
+      if (becomingCollapsed) collapsedDomains.add(domain);
+      else collapsedDomains.delete(domain);
     });
 
-    // Add screenshot cards
-    domainScreenshots.forEach(screenshot => {
-      const card = createScreenshotCard(screenshot);
-      grid.appendChild(card);
-    });
-
+    domainScreenshots.forEach(s => grid.appendChild(createScreenshotCard(s)));
     return group;
   }
 
-  // Create screenshot card element
   function createScreenshotCard(screenshot) {
     const card = document.createElement('div');
     card.className = 'screenshot-card';
     card.dataset.id = screenshot.id;
-
     const isSelected = selectedIds.has(screenshot.id);
     if (isSelected) card.classList.add('selected');
     
-    // Only show mockup button for viewport screenshots (not fullpage)
-    const showMockup = screenshot.captureType === 'viewport';
-
-    // Check if this is a video file
     const isVideo = screenshot.captureType === 'video' || screenshot.filename?.endsWith('.webm');
     
     card.innerHTML = `
@@ -325,11 +306,11 @@ document.addEventListener('DOMContentLoaded', () => {
           <img class="card-image" src="${screenshot.dataUrl}" alt="${screenshot.filename}" loading="lazy">
         `}
         <div class="screenshot-overlay">
-          <button class="btn btn-icon btn-view" title="View Full (V)">👁️</button>
-          <button class="btn btn-icon btn-copy" title="Copy to Clipboard (C)">📋</button>
-          <button class="btn btn-icon btn-mockup" title="Device Mockup (M)">📱</button>
-          <button class="btn btn-icon btn-download" title="Download (D)">📥</button>
-          <button class="btn btn-icon btn-delete" title="Delete (Del)">🗑️</button>
+          <button class="btn btn-icon btn-view" title="View Full">👁️</button>
+          <button class="btn btn-icon btn-copy" title="Copy to Clipboard">📋</button>
+          <button class="btn btn-icon btn-mockup" title="Device Mockup">📱</button>
+          <button class="btn btn-icon btn-download" title="Download">📥</button>
+          <button class="btn btn-icon btn-delete" title="Delete">🗑️</button>
         </div>
       </div>
       <div class="card-info">
@@ -342,29 +323,21 @@ document.addEventListener('DOMContentLoaded', () => {
           <span class="card-badge ${screenshot.captureType}">${screenshot.captureType}</span>
         </div>
         <div class="card-date">${formatDate(screenshot.timestamp)}</div>
-        ${isVideo ? `<div class="card-video-label">🎥 Video Capture</div>` : ''}
       </div>
     `;
 
-    // Event listeners
     const checkbox = card.querySelector('.card-checkbox');
-    const imagePreview = card.querySelector('.screenshot-preview');
     const viewBtn = card.querySelector('.btn-view');
     const copyBtn = card.querySelector('.btn-copy');
     const mockupBtn = card.querySelector('.btn-mockup');
     const downloadBtn = card.querySelector('.btn-download');
     const deleteBtn = card.querySelector('.btn-delete');
     const renameBtn = card.querySelector('.btn-rename');
-    const infoArea = card.querySelector('.card-info');
 
-    // Robust Selection Action
     card.addEventListener('click', (e) => {
-      // Don't trigger if a button was clicked
       if (e.target.closest('.btn-icon') || e.target.closest('.btn-rename')) return;
       
       const isCurrentlySelected = selectedIds.has(screenshot.id);
-      
-      // Shift-click support
       if (e.shiftKey && lastSelectedId !== null) {
         const allFilteredIds = Array.from(document.querySelectorAll('.screenshot-card')).map(c => parseInt(c.dataset.id));
         const startIdx = allFilteredIds.indexOf(lastSelectedId);
@@ -380,7 +353,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
       toggleSelect(screenshot.id, !isCurrentlySelected);
       lastSelectedId = screenshot.id;
-      checkbox.checked = !isCurrentlySelected;
     });
 
     checkbox.addEventListener('click', (e) => {
@@ -389,30 +361,18 @@ document.addEventListener('DOMContentLoaded', () => {
       lastSelectedId = screenshot.id;
     });
 
-    // Overlay Action: View
-    viewBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      openPreview(screenshot);
-    });
-
-    // Copy to Clipboard
-    copyBtn.addEventListener('click', async (e) => {
+    viewBtn.onclick = (e) => { e.stopPropagation(); openPreview(screenshot); };
+    
+    copyBtn.onclick = async (e) => {
       e.stopPropagation();
       try {
         const response = await fetch(screenshot.dataUrl);
         const blob = await response.blob();
-        await navigator.clipboard.write([
-          new ClipboardItem({ [blob.type]: blob })
-        ]);
-        copyBtn.innerHTML = '✅';
-        setTimeout(() => copyBtn.innerHTML = '📋', 2000);
-      } catch (err) {
-        console.error('Copy failed:', err);
-        alert('Failed to copy image to clipboard.');
-      }
-    });
+        await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })]);
+        copyBtn.innerHTML = '✅'; setTimeout(() => copyBtn.innerHTML = '📋', 2000);
+      } catch (err) { console.error('Copy failed:', err); }
+    };
 
-    // Rename
     const renameAction = async (e) => {
       e?.stopPropagation();
       const newName = prompt('Enter new filename:', screenshot.filename);
@@ -422,112 +382,77 @@ document.addEventListener('DOMContentLoaded', () => {
         renderGallery();
       }
     };
-    renameBtn.addEventListener('click', renameAction);
-    card.querySelector('.card-filename').addEventListener('click', (e) => {
-      e.stopPropagation();
-      renameAction();
-    });
+    renameBtn.onclick = renameAction;
+    card.querySelector('.card-filename').onclick = renameAction;
 
-    // Overlay Action: Mockup
     if (isVideo || screenshot.captureType === 'showcase') {
       mockupBtn.style.display = 'none';
-      copyBtn.style.display = 'none';
+      if (isVideo) copyBtn.style.display = 'none';
     } else {
-      mockupBtn.addEventListener('click', (e) => {
-        e.stopPropagation();
-        openMockupModal(screenshot);
-      });
+      mockupBtn.onclick = (e) => { e.stopPropagation(); openMockupModal(screenshot); };
     }
 
-    // Overlay Action: Download
-    downloadBtn.addEventListener('click', (e) => {
-      e.stopPropagation();
-      downloadScreenshot(screenshot);
-    });
-
-    // Overlay Action: Delete
-    deleteBtn.addEventListener('click', async (e) => {
+    downloadBtn.onclick = (e) => { e.stopPropagation(); downloadScreenshot(screenshot); };
+    
+    deleteBtn.onclick = async (e) => {
       e.stopPropagation();
       if (confirm('Delete this screenshot?')) {
         await db.delete(screenshot.id);
+        selectedIds.delete(screenshot.id); // Fix: Remove from selection if deleted
         loadScreenshots();
       }
-    });
+    };
 
-    // Video play/pause on click
     if (isVideo) {
       const videoEl = card.querySelector('.card-video');
-      imagePreview.addEventListener('click', (e) => {
-        if (e.target.closest('.btn-icon')) return; // Let buttons work
-        e.stopPropagation();
-        if (videoEl.paused) {
-          videoEl.play();
-        } else {
-          videoEl.pause();
-        }
-      });
-    }
+      const preview = card.querySelector('.screenshot-preview');
+      
+      // Add a play icon overlay for videos
+      const playIcon = document.createElement('div');
+      playIcon.innerHTML = '▶';
+      playIcon.style.cssText = 'position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);font-size:3rem;color:white;opacity:0.5;pointer-events:none;transition:0.3s;';
+      preview.appendChild(playIcon);
 
-    // Note: Duplicate event listeners removed - they were already added above
+      preview.addEventListener('mouseenter', () => {
+        playIcon.style.opacity = '0.8';
+        videoEl.play();
+      });
+      preview.addEventListener('mouseleave', () => {
+        playIcon.style.opacity = '0.5';
+        videoEl.pause();
+        videoEl.currentTime = 0;
+      });
+
+      // Selection still works via the card click handler
+    }
 
     return card;
   }
 
-  // Selection management
   function toggleSelect(id, selected) {
-    if (selected) {
-      selectedIds.add(id);
-    } else {
-      selectedIds.delete(id);
-      if (lastSelectedId === id) lastSelectedId = null;
-    }
-    updateSelectionState();
+    if (selected) selectedIds.add(id);
+    else selectedIds.delete(id);
     
-    // Find all cards with this ID (could be in multiple groups if filtered/grouped weirdly)
-    const cards = document.querySelectorAll(`[data-id="${id}"]`);
-    cards.forEach(card => {
-       card.classList.toggle('selected', selected);
-       const cb = card.querySelector('.card-checkbox');
-       if (cb) cb.checked = selected;
+    updateSelectionState();
+    document.querySelectorAll(`.screenshot-card[data-id="${id}"]`).forEach(card => {
+      card.classList.toggle('selected', selected);
+      const cb = card.querySelector('.card-checkbox');
+      if (cb) cb.checked = selected;
     });
-  }
-
-  function toggleSelectAll() {
-    const allIds = screenshots.map(s => s.id);
-    
-    if (selectAllCheckbox.checked) {
-      allIds.forEach(id => selectedIds.add(id));
-    } else {
-      selectedIds.clear();
-    }
-    
-    updateSelectionState();
-    renderGallery();
   }
 
   function updateSelectionState() {
-    const hasSelection = selectedIds.size > 0;
-    deleteSelectedBtn.disabled = !hasSelection;
-    downloadSelectedBtn.disabled = !hasSelection;
-    exportPdfBtn.disabled = !hasSelection;
-    // Enable showcase when 3+ screenshots selected
-    showcaseBtn.disabled = selectedIds.size < 3;
-    // Enable custom canvas when any screenshots selected
-    if (customCanvasBtn) customCanvasBtn.disabled = !hasSelection;
-
-    selectAllCheckbox.checked = screenshots.length > 0 && selectedIds.size >= screenshots.length;
-    
-    // Update group checkboxes visually
-    document.querySelectorAll('.group-checkbox').forEach(cb => {
-       // Check if all cards in this group are selected
-       const group = cb.closest('.domain-group');
-       const groupShotsCount = group.querySelectorAll('.screenshot-card').length;
-       const groupSelectedCount = group.querySelectorAll('.screenshot-card.selected').length;
-       cb.checked = groupShotsCount > 0 && groupSelectedCount === groupShotsCount;
-    });
+    const count = selectedIds.size;
+    if (count > 0) {
+      selectionBar.classList.add('active');
+      selectionCount.textContent = `${count} items selected`;
+      showcaseBtn.disabled = count < 2;
+    } else {
+      selectionBar.classList.remove('active');
+    }
   }
 
-  // Actions
+  // --- ACTIONS ---
   async function downloadScreenshot(screenshot) {
     const link = document.createElement('a');
     link.href = screenshot.dataUrl;
@@ -535,29 +460,16 @@ document.addEventListener('DOMContentLoaded', () => {
     link.click();
   }
 
-  async function deleteScreenshot(id) {
-    if (!confirm('Delete this screenshot?')) return;
-    
-    await db.delete(id);
-    screenshots = screenshots.filter(s => s.id !== id);
-    selectedIds.delete(id);
-    renderGallery();
-  }
-
   async function deleteSelected() {
     if (!confirm(`Delete ${selectedIds.size} screenshots?`)) return;
-    
-    for (const id of selectedIds) {
-      await db.delete(id);
-    }
+    for (const id of selectedIds) await db.delete(id);
     screenshots = screenshots.filter(s => !selectedIds.has(s.id));
     selectedIds.clear();
     renderGallery();
   }
 
   async function clearAll() {
-    if (!confirm('Are you sure you want to delete ALL screenshots? This cannot be undone.')) return;
-    
+    if (!confirm('Are you sure you want to delete ALL screenshots?')) return;
     await db.clear();
     screenshots = [];
     selectedIds.clear();
@@ -566,38 +478,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
   async function downloadSelected() {
     const selected = screenshots.filter(s => selectedIds.has(s.id));
-    for (const screenshot of selected) {
-      await downloadScreenshot(screenshot);
-      await sleep(100); // Small delay between downloads
+    for (const s of selected) {
+      downloadScreenshot(s);
+      await new Promise(r => setTimeout(r, 100));
     }
   }
 
-  async function downloadAll() {
-    for (const screenshot of screenshots) {
-      await downloadScreenshot(screenshot);
-      await sleep(100);
-    }
-  }
-
-  // --- UTILITIES ---
-
-  function sleep(ms) { return new Promise(r => setTimeout(r, ms)); }
-  
   function formatDate(timestamp) {
     return new Date(timestamp).toLocaleDateString('en-US', { 
-           month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
+      month: 'short', day: 'numeric', hour: 'numeric', minute: '2-digit' 
     });
   }
 
   async function exportPdf() {
     if (selectedIds.size === 0) return;
-    
-    // Check if jsPDF is available
     if (typeof jspdf === 'undefined' && typeof window.jspdf === 'undefined') {
-       alert('PDF library not loaded. Please refresh the page.');
+       alert('PDF library not loaded.'); 
        return;
     }
-
     const { jsPDF } = window.jspdf;
     const doc = new jsPDF();
     const selected = screenshots.filter(s => selectedIds.has(s.id));
@@ -608,29 +506,25 @@ document.addEventListener('DOMContentLoaded', () => {
     try {
       for (let i = 0; i < selected.length; i++) {
         if (i > 0) doc.addPage();
-        
         const s = selected[i];
         const imgProps = doc.getImageProperties(s.dataUrl);
         const pdfWidth = doc.internal.pageSize.getWidth();
         const pdfHeight = (imgProps.height * pdfWidth) / imgProps.width;
-        
         doc.addImage(s.dataUrl, 'PNG', 0, 0, pdfWidth, pdfHeight);
-        doc.text(`${s.domain} - ${formatDate(s.timestamp)}`, 10, pdfHeight + 10);
       }
-      
       doc.save(`DevShot_Export_${Date.now()}.pdf`);
       exportPdfBtn.innerHTML = '✅ Done';
-    } catch (err) {
-      console.error(err);
-      alert('PDF Export failed: ' + err.message);
-      exportPdfBtn.innerHTML = '❌ Failed';
+    } catch (err) { 
+      console.error(err); 
+      exportPdfBtn.innerHTML = '❌ Error';
     } finally {
       setTimeout(() => {
-        exportPdfBtn.innerHTML = '<span>📄</span> Export PDF';
+        exportPdfBtn.innerHTML = '📄 Export PDF';
         exportPdfBtn.disabled = false;
       }, 2000);
     }
   }
+
 
   // Download all screenshots in a domain as a ZIP file
   async function downloadDomainAsZip(domain, domainScreenshots, btn) {
@@ -754,141 +648,13 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // Main Unified Showcase Modal
   function openShowcaseModal(initialScreenshots, hasMoreAvailable = false, initialMode = 'default') {
-    // State
-    const state = {
-      assignments: {}, // { 0: screenshot, 1: screenshot }
-      available: hasMoreAvailable ? initialScreenshots : [...initialScreenshots], 
-      template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : 'surface-display'),
-      background: { type: 'gradient', value: ['#1a1a2e', '#0f3460'] },
-      zoom: 0.8, // Start zoomed out slightly to see whole canvas
-      customItems: [],
-      selectedItem: null,
-      texts: {} // { 'id': 'Text Value' }
-    };
-
-    // Initialize default texts for templates - MUST be called after TEMPLATES is defined
-    const initTexts = () => {
-        const t = TEMPLATES.find(x => x.id === state.template);
-        if (t && t.textSlots) {
-            t.textSlots.forEach(slot => {
-                if (!state.texts[slot.id]) state.texts[slot.id] = slot.default;
-            });
-        }
-    };
-    // NOTE: initTexts() is called later, after TEMPLATES is defined
-
-    // Smart Auto-assign: Match screenshots to slots based on device and capture type
-    if (initialMode === 'single' && initialScreenshots[0]) {
-      // For single device, prefer viewport capture
-      const viewport = initialScreenshots.find(s => s.captureType === 'viewport');
-      state.assignments[0] = viewport || initialScreenshots[0];
-    } else if (initialMode !== 'custom') {
-      // Smart Auto-assign: Match screenshots to slots based on device and capture type
-      const TEMPLATES_INIT = [
-        { id: '3-device', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'tablet', type: 'viewport' },
-          { id: 2, device: 'mobile', type: 'viewport' }
-        ]},
-        { id: 'hero-layout', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'mobile', type: 'viewport' }
-        ]},
-        { id: 'floating-devices', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'tablet', type: 'viewport' },
-          { id: 2, device: 'mobile', type: 'viewport' }
-        ]},
-        { id: 'browser-comparison', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'desktop', type: 'viewport' }
-        ]},
-        { id: 'bold-color-grid', slots: [
-          { id: 0, device: 'any', type: 'fullpage' },
-          { id: 1, device: 'any', type: 'fullpage' },
-          { id: 2, device: 'any', type: 'fullpage' },
-          { id: 3, device: 'any', type: 'fullpage' }
-        ]},
-        // New templates
-        { id: 'app-store-style', slots: [
-          { id: 0, device: 'mobile', type: 'viewport' }
-        ]},
-        { id: 'landing-hero', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'mobile', type: 'viewport' }
-        ]},
-        { id: 'responsive-row', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'tablet', type: 'viewport' },
-          { id: 2, device: 'mobile', type: 'viewport' }
-        ]},
-        { id: 'before-after', slots: [
-          { id: 0, device: 'desktop', type: 'viewport' },
-          { id: 1, device: 'desktop', type: 'viewport' }
-        ]},
-        { id: 'fullpage-showcase', slots: [
-          { id: 0, device: 'any', type: 'fullpage' }
-        ]},
-        { id: 'page-comparison', slots: [
-          { id: 0, device: 'any', type: 'fullpage' },
-          { id: 1, device: 'any', type: 'fullpage' }
-        ]}
-      ];
-      
-      const templateConfig = TEMPLATES_INIT.find(t => t.id === state.template);
-      const usedIds = new Set();
-      
-      if (templateConfig) {
-        // Smart matching
-        templateConfig.slots.forEach(slot => {
-          let match = initialScreenshots.find(s => 
-            !usedIds.has(s.id) &&
-            (slot.device === 'any' || s.device === slot.device) &&
-            s.captureType === slot.type
-          );
-          // Fallback: any matching device
-          if (!match) {
-            match = initialScreenshots.find(s => 
-              !usedIds.has(s.id) && 
-              (slot.device === 'any' || s.device === slot.device)
-            );
-          }
-          // Final fallback: any unused
-          if (!match) {
-            match = initialScreenshots.find(s => !usedIds.has(s.id));
-          }
-          if (match) {
-            state.assignments[slot.id] = match;
-            usedIds.add(match.id);
-          }
-        });
-      } else {
-        // Default: just assign first few
-        initialScreenshots.slice(0, 4).forEach((s, i) => {
-          state.assignments[i] = s;
-        });
-      }
-    }
-
-    // Initialize Custom Items in custom mode
-    if (initialMode === 'custom') {
-      state.customItems = initialScreenshots.map((s, i) => ({
-        id: Date.now() + i,
-        img: s, // storing ref
-        x: 400 + (i * 100),
-        y: 400 + (i * 50),
-        w: 600,
-        deviceId: 'macbook-pro-16'
-      }));
-    }
-
-    // Constants
+    // --- Constants ---
     const TEMPLATES = [
       // Standard Device Layouts
       { id: 'single-device', name: 'Single Device', icon: '📱', slots: [{ id: 0, defaultDevice: 'iphone-15-pro', label: 'Device' }] },
       { id: '3-device', name: 'Tri-Device', icon: '💻📱', slots: [
-        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Center (Desktop)' }, 
-        { id: 1, defaultDevice: 'ipad-pro-11', label: 'Left (Tablet)' }, 
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Center (Desktop)' },
+        { id: 1, defaultDevice: 'ipad-pro-11', label: 'Left (Tablet)' },
         { id: 2, defaultDevice: 'iphone-15-pro', label: 'Right (Phone)' }
       ]},
       { id: 'hero-layout', name: 'Hero Header', icon: '💎', slots: [
@@ -913,7 +679,7 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 2, defaultDevice: 'browser-light', label: 'Front' }
       ]},
       { id: 'bold-color-grid', name: 'Grid Layout', icon: '⬛', slots: [0, 1, 2, 3].map(i => ({ id: i, defaultDevice: 'none', label: `Screen ${i+1}` })) },
-      
+
       // Professional Device Mockups (New)
       { id: 'surface-display', name: 'Surface Display', icon: '🖥️📱', slots: [
         { id: 0, defaultDevice: 'imac-24', label: 'Desktop (Center)' },
@@ -933,41 +699,38 @@ document.addEventListener('DOMContentLoaded', () => {
       { id: 'imac-spotlight', name: 'iMac Spotlight', icon: '🖥️', slots: [
         { id: 0, defaultDevice: 'imac-24', label: 'iMac Display' }
       ]},
-      
+
       // Text & Marketing Templates
-      { id: 'social-post', name: 'Social Post', icon: '💬', 
+      { id: 'social-post', name: 'Social Post', icon: '💬',
         slots: [{ id: 0, defaultDevice: 'macbook-pro-16', label: 'Visual' }],
         textSlots: [
           { id: 'title', label: 'Headline', default: 'New Feature Alert', type: 'h1' },
           { id: 'subtitle', label: 'Description', default: 'Check out this amazing update we just shipped.', type: 'p' }
         ]
       },
-      { id: 'feature-announce', name: 'Feature Announce', icon: '📢', 
+      { id: 'feature-announce', name: 'Feature Announce', icon: '📢',
         slots: [{ id: 0, defaultDevice: 'iphone-15-pro', label: 'App View' }],
         textSlots: [
           { id: 'title', label: 'Big Announcement', default: 'Introducing v2.0', type: 'h1' },
           { id: 'tagline', label: 'Tagline', default: 'Faster. Better. Stronger.', type: 'span' }
         ]
       },
-      { id: 'linkedin-slide', name: 'LinkedIn Slide', icon: '👔', 
+      { id: 'linkedin-slide', name: 'LinkedIn Slide', icon: '👔',
         slots: [{ id: 0, defaultDevice: 'macbook-pro-16', label: 'Content' }],
         textSlots: [
           { id: 'title', label: 'Key Takeaway', default: 'How we optimized performance by 300%', type: 'h1' }
         ]
       },
-      { id: 'quote-card', name: 'Quote Card', icon: '❝', 
+      { id: 'quote-card', name: 'Quote Card', icon: '❝',
         slots: [], // No image slots, just text
         textSlots: [
           { id: 'quote', label: 'Quote', default: 'DevShot has completely changed how we showcase our work.', type: 'quote' },
           { id: 'author', label: 'Author', default: '@Hamzaisadev', type: 'span' }
         ]
       },
-      
+
       { id: 'custom', name: 'Custom Canvas', icon: '🎨', slots: [] }
     ];
-
-    // Initialize text values now that TEMPLATES is defined
-    initTexts();
 
     const DEVICE_TYPES = [
       { id: 'none', name: 'No Frame', icon: '🖼️' },
@@ -991,10 +754,92 @@ document.addEventListener('DOMContentLoaded', () => {
       { id: 'browser-light', name: 'Browser (Light)', icon: '🌐' }
     ];
 
+    // State
+    const state = {
+      assignments: {}, // { 0: screenshot, 1: screenshot }
+      available: hasMoreAvailable ? initialScreenshots : [...initialScreenshots],
+      template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : 'surface-display'),
+      background: { type: 'gradient', value: ['#1a1a2e', '#0f3460'] },
+      zoom: 0.8, // Start zoomed out slightly to see whole canvas
+      customItems: [],
+      selectedItem: null,
+      texts: {} // { 'id': 'Text Value' }
+    };
+
+    // Smart Assignment Core
+    const autoAssignSlots = (tplId) => {
+      const t = TEMPLATES.find(x => x.id === tplId);
+      if (!t || t.slots.length === 0) return;
+
+      const usedIds = new Set();
+      t.slots.forEach(slot => {
+        const hint = slot.defaultDevice || '';
+        const isPhone = hint.includes('iphone') || hint.includes('pixel') || hint.includes('samsung');
+        const isTablet = hint.includes('ipad') || hint.includes('surface') || hint.includes('tablet');
+        const isFullPage = hint === 'none';
+
+        let match = null;
+        // Try to match by specific device type and capture type
+        if (isFullPage) {
+          match = state.available.find(s => !usedIds.has(s.id) && s.captureType === 'fullpage');
+        } else if (isPhone) {
+          match = state.available.find(s => !usedIds.has(s.id) && s.device === 'mobile' && s.captureType === 'viewport');
+        } else if (isTablet) {
+          match = state.available.find(s => !usedIds.has(s.id) && s.device === 'tablet' && s.captureType === 'viewport');
+        } else { // Assume desktop or browser
+          match = state.available.find(s => !usedIds.has(s.id) && s.device === 'desktop' && s.captureType === 'viewport');
+        }
+
+        // Fallback: any matching device type (viewport)
+        if (!match) {
+          if (isPhone) match = state.available.find(s => !usedIds.has(s.id) && s.device === 'mobile');
+          else if (isTablet) match = state.available.find(s => !usedIds.has(s.id) && s.device === 'tablet');
+          else if (!isFullPage) match = state.available.find(s => !usedIds.has(s.id) && s.device === 'desktop');
+        }
+
+        // Final fallback: any unused screenshot
+        if (!match) {
+          match = state.available.find(s => !usedIds.has(s.id));
+        }
+
+        if (match) {
+          state.assignments[slot.id] = match;
+          usedIds.add(match.id);
+        }
+      });
+    };
+
+    // Initialize default texts for templates
+    const initTexts = () => {
+        const t = TEMPLATES.find(x => x.id === state.template);
+        if (t && t.textSlots) {
+            t.textSlots.forEach(slot => {
+                if (!state.texts[slot.id]) state.texts[slot.id] = slot.default;
+            });
+        }
+    };
+
+    // Unified Initialization Flow
+    if (state.template !== 'custom') {
+       autoAssignSlots(state.template);
+    } else {
+       state.customItems = initialScreenshots.map((s, i) => ({
+        id: Date.now() + i,
+        img: s,
+        x: 400 + (i * 100),
+        y: 400 + (i * 50),
+        w: 600,
+        deviceId: s.device === 'mobile' ? 'iphone-15-pro' : 'macbook-pro-16'
+      }));
+    }
+
+    // Initialize text values now that TEMPLATES is defined
+    initTexts();
+
     // Slot Configuration - Per template to avoid cross-template contamination
     const slotConfig = {};
     const getSlotConfigKey = (templateId, slotId) => `${templateId}-${slotId}`;
-    
+
     // Initialize slot configs per template
     TEMPLATES.forEach(t => {
       t.slots.forEach(s => {
@@ -1939,37 +1784,7 @@ document.addEventListener('DOMContentLoaded', () => {
         
         // Auto-assign screenshots to new template slots
         if (newTemplate !== 'custom') {
-          const templateConfig = TEMPLATES.find(t => t.id === newTemplate);
-          if (templateConfig && templateConfig.slots.length > 0) {
-            const usedIds = new Set();
-            templateConfig.slots.forEach(slot => {
-              // Find best matching screenshot for this slot
-              const slotDeviceHint = slot.defaultDevice;
-              const isPhoneSlot = slotDeviceHint.includes('phone') || slotDeviceHint.includes('pixel') || slotDeviceHint.includes('samsung');
-              const isTabletSlot = slotDeviceHint.includes('ipad') || slotDeviceHint.includes('surface') || slotDeviceHint.includes('tablet');
-              const isFullPageSlot = slotDeviceHint === 'none';
-              
-              let match = null;
-              // Try to match by device and capture type
-              if (isFullPageSlot) {
-                match = state.available.find(s => !usedIds.has(s.id) && s.captureType === 'fullpage');
-              } else if (isPhoneSlot) {
-                match = state.available.find(s => !usedIds.has(s.id) && s.device === 'mobile' && s.captureType === 'viewport');
-              } else if (isTabletSlot) {
-                match = state.available.find(s => !usedIds.has(s.id) && s.device === 'tablet' && s.captureType === 'viewport');
-              } else {
-                match = state.available.find(s => !usedIds.has(s.id) && s.device === 'desktop' && s.captureType === 'viewport');
-              }
-              // Fallback: any unused screenshot
-              if (!match) {
-                match = state.available.find(s => !usedIds.has(s.id));
-              }
-              if (match) {
-                state.assignments[slot.id] = match;
-                usedIds.add(match.id);
-              }
-            });
-          }
+          autoAssignSlots(newTemplate);
         }
         
         overlay.querySelectorAll('.tpl-btn').forEach(b => {
@@ -2185,8 +2000,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
 
     document.body.appendChild(overlay);
-    
-    // Initial Render
     updateUI();
     render();
   }
@@ -2465,182 +2278,275 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Batch Website Screenshot Capture Modal
-  function openBatchCaptureModal() {
-    let captureDevice = 'desktop';
-    let captureType = 'viewport';
-    let captureDelay = 3000;
-
+   function openBatchCaptureModal() {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
+    overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
+    
     overlay.innerHTML = `
-      <div class="showcase-modal" style="max-width: 600px;">
-        <div class="showcase-header">
-          <h2>📷 Batch Website Capture</h2>
-          <button class="modal-close">✕</button>
+      <div class="showcase-ui" style="width:100%;max-width:800px;height:auto;max-height:90vh;background:#0f0f12;border-radius:20px;box-shadow:0 30px 60px rgba(0,0,0,0.5);display:flex;flex-direction:column;overflow:hidden;border:1px solid rgba(255,255,255,0.1);">
+        <div class="showcase-header" style="padding:24px;border-bottom:1px solid rgba(255,255,255,0.05);display:flex;justify-content:space-between;align-items:center;">
+          <h2 style="margin:0;font-size:1.4rem;color:white;display:flex;align-items:center;gap:12px;">
+            <span style="background:var(--accent);width:4px;height:20px;border-radius:2px;"></span>
+            Batch Website Capture
+          </h2>
+          <button class="modal-close" style="background:none;border:none;color:white;font-size:1.8rem;cursor:pointer;opacity:0.6;transition:0.2s;">&times;</button>
         </div>
-        <div class="showcase-body" style="padding: 20px;">
-          <p style="color: var(--text-secondary); margin-bottom: 16px;">
-            Capture screenshots from multiple websites. Enter one URL per line.
-          </p>
-          
-          <div class="showcase-section">
-            <h3>Website URLs</h3>
-            <textarea id="batch-urls" class="batch-urls-input" rows="6" 
-              placeholder="https://example.com&#10;https://google.com&#10;https://github.com"></textarea>
-            <p class="hint" style="margin-top: 8px; font-size: 0.8rem; color: var(--text-muted);">
-              Enter one URL per line. Invalid URLs will be skipped.
-            </p>
-          </div>
-
-          <div class="showcase-section" style="display: flex; gap: 20px; flex-wrap: wrap;">
-            <div style="flex: 1; min-width: 120px;">
-              <h3>Device</h3>
-              <select id="batch-device" class="select" style="width: 100%;">
-                <option value="desktop" selected>🖥️ Desktop</option>
-                <option value="mobile">📱 Mobile</option>
-                <option value="tablet">📲 Tablet</option>
-              </select>
-            </div>
-            <div style="flex: 1; min-width: 120px;">
-              <h3>Type</h3>
-              <select id="batch-type" class="select" style="width: 100%;">
-                <option value="viewport" selected>Viewport</option>
-                <option value="fullpage">Full Page</option>
-              </select>
-            </div>
-            <div style="flex: 1; min-width: 120px;">
-              <h3>Delay</h3>
-              <select id="batch-delay" class="select" style="width: 100%;">
-                <option value="0">None</option>
-                <option value="2000">2 seconds</option>
-                <option value="3000" selected>3 seconds</option>
-                <option value="5000">5 seconds</option>
-              </select>
+        
+        <div class="showcase-body" style="flex:1;overflow-y:auto;padding:32px;">
+          <!-- STAGE 1: Input -->
+          <div id="batch-stage-input">
+            <h3 style="margin:0 0 12px 0;font-size:0.9rem;color:rgba(255,255,255,0.6);text-transform:uppercase;letter-spacing:1px;">Enter URLs</h3>
+            <p style="font-size:0.85rem;color:rgba(255,255,255,0.4);margin-bottom:16px;">Enter one URL per line. We'll automatically verify them.</p>
+            <textarea id="batch-urls" placeholder="example.com\nhttps://google.com\n..." 
+              style="width:100%;height:150px;background:#16161a;border:1px solid rgba(255,255,255,0.1);border-radius:12px;color:white;padding:16px;font-family:monospace;font-size:0.9rem;resize:none;outline:none;transition:0.3s;"></textarea>
+            
+            <div style="display:flex;justify-content:flex-end;margin-top:20px;">
+              <button class="btn btn-primary" id="btn-parse-urls">Next: Verify & Select</button>
             </div>
           </div>
 
-          <div class="batch-progress" id="batch-capture-progress" style="display: none; margin-top: 20px;">
-            <div class="progress-bar" style="background: var(--bg-tertiary); border-radius: 6px; overflow: hidden; height: 8px;">
-              <div class="progress-fill" id="batch-progress-fill" style="height: 100%; background: var(--accent-primary); width: 0%; transition: width 0.3s;"></div>
+          <!-- STAGE 2: Verification & Config -->
+          <div id="batch-stage-config" style="display: none;">
+            <div class="batch-controls">
+              <div style="flex: 2;">
+                 <h3 style="margin:0 0 8px 0;font-size:0.85rem;color:rgba(255,255,255,0.5);">Select Targets</h3>
+                 <div style="display:flex;gap:12px;margin-bottom:12px;">
+                   <button class="text-btn" id="btn-batch-select-all">Select All</button>
+                   <button class="text-btn" id="btn-batch-select-none">Clear</button>
+                 </div>
+              </div>
             </div>
-            <p class="progress-text" id="batch-progress-text" style="font-size: 0.85rem; color: var(--text-secondary); margin-top: 8px;">Ready</p>
-            <div class="batch-log" id="batch-log" style="max-height: 120px; overflow-y: auto; margin-top: 12px; font-size: 0.8rem; font-family: monospace; background: var(--bg-tertiary); padding: 10px; border-radius: 6px;"></div>
+
+            <div class="url-list-container" id="url-list">
+              <!-- URLs will appear here -->
+            </div>
+
+            <div style="margin-top:24px; display:grid; grid-template-columns:repeat(3, 1fr); gap:16px;">
+              <div>
+                <h3 style="margin:0 0 8px 0;font-size:0.8rem;color:rgba(255,255,255,0.4);">Device</h3>
+                <select id="batch-device" class="minimal-select" style="width:100%;">
+                  <option value="desktop">🖥️ Desktop</option>
+                  <option value="mobile">📱 Mobile</option>
+                  <option value="tablet">📲 Tablet</option>
+                </select>
+              </div>
+              <div>
+                <h3 style="margin:0 0 8px 0;font-size:0.8rem;color:rgba(255,255,255,0.4);">Type</h3>
+                <select id="batch-type" class="minimal-select" style="width:100%;">
+                  <option value="viewport">Viewport</option>
+                  <option value="fullpage">Full Page</option>
+                </select>
+              </div>
+              <div>
+                <h3 style="margin:0 0 8px 0;font-size:0.8rem;color:rgba(255,255,255,0.4);">Delay</h3>
+                <select id="batch-delay" class="minimal-select" style="width:100%;">
+                  <option value="0">None</option>
+                  <option value="2000">2s</option>
+                  <option value="3000" selected>3s</option>
+                  <option value="5000">5s</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="display:flex;justify-content:space-between;margin-top:32px;align-items:center;">
+              <button class="text-btn" id="btn-batch-back">← Back</button>
+              <button class="btn btn-primary" id="btn-start-batch-capture">🚀 Start Capture</button>
+            </div>
           </div>
-        </div>
-        <div class="showcase-footer">
-          <button class="btn btn-secondary" id="btn-cancel-batch-capture">Cancel</button>
-          <button class="btn btn-primary" id="btn-start-batch-capture">🚀 Start Capture</button>
+
+          <!-- STAGE 3: Progress -->
+          <div id="batch-stage-progress" style="display: none;">
+             <div style="text-align:center;margin-bottom:24px;">
+               <h2 id="batch-status-title">Processing...</h2>
+               <p id="batch-status-sub" style="color:var(--text-dim);font-size:0.9rem;">Please keep this tab open</p>
+             </div>
+             
+             <div class="progress-bar" style="background:rgba(255,255,255,0.05);height:12px;border-radius:6px;overflow:hidden;margin-bottom:12px;">
+               <div id="batch-progress-fill" style="width:0%;height:100%;background:var(--accent-gradient);transition:width 0.4s cubic-bezier(0.4, 0, 0.2, 1);"></div>
+             </div>
+             
+             <div style="display:flex;justify-content:space-between;font-size:0.8rem;color:var(--text-dim);margin-bottom:24px;">
+                <span id="batch-progress-text">0/0 Complete</span>
+                <span id="batch-percentage">0%</span>
+             </div>
+
+             <div class="batch-log" id="batch-log" style="height:200px;overflow-y:auto;background:rgba(0,0,0,0.3);border-radius:12px;padding:16px;font-family:monospace;font-size:0.8rem;border:1px solid rgba(255,255,255,0.05);">
+             </div>
+
+             <div style="display:flex;justify-content:center;margin-top:24px;">
+               <button class="btn btn-secondary" id="btn-close-batch" style="display:none;">Close Gallery</button>
+             </div>
+          </div>
         </div>
       </div>
     `;
 
-    const closeBtn = overlay.querySelector('.modal-close');
-    const cancelBtn = overlay.querySelector('#btn-cancel-batch-capture');
-    const startBtn = overlay.querySelector('#btn-start-batch-capture');
+    // Elements
+    const stageInput = overlay.querySelector('#batch-stage-input');
+    const stageConfig = overlay.querySelector('#batch-stage-config');
+    const stageProgress = overlay.querySelector('#batch-stage-progress');
+    
     const urlsTextarea = overlay.querySelector('#batch-urls');
+    const urlList = overlay.querySelector('#url-list');
+    const log = overlay.querySelector('#batch-log');
+    
+    const btnParse = overlay.querySelector('#btn-parse-urls');
+    const btnBack = overlay.querySelector('#btn-batch-back');
+    const btnStart = overlay.querySelector('#btn-start-batch-capture');
+    const btnClose = overlay.querySelector('#btn-close-batch');
+    const btnSelectAll = overlay.querySelector('#btn-batch-select-all');
+    const btnSelectNone = overlay.querySelector('#btn-batch-select-none');
+    
+    // Config values
     const deviceSelect = overlay.querySelector('#batch-device');
     const typeSelect = overlay.querySelector('#batch-type');
     const delaySelect = overlay.querySelector('#batch-delay');
-    const progressEl = overlay.querySelector('#batch-capture-progress');
+
+    // Progress
     const progressFill = overlay.querySelector('#batch-progress-fill');
     const progressText = overlay.querySelector('#batch-progress-text');
-    const batchLog = overlay.querySelector('#batch-log');
+    const percentageText = overlay.querySelector('#batch-percentage');
+    const statusTitle = overlay.querySelector('#batch-status-title');
 
-    closeBtn.addEventListener('click', () => overlay.remove());
-    cancelBtn.addEventListener('click', () => overlay.remove());
-    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+    let processedUrls = [];
 
-    function addLogEntry(message, type = 'info') {
-      const entry = document.createElement('div');
-      entry.style.color = type === 'error' ? '#ff6b6b' : type === 'success' ? '#28c840' : 'inherit';
-      entry.textContent = `${new Date().toLocaleTimeString()} - ${message}`;
-      batchLog.appendChild(entry);
-      batchLog.scrollTop = batchLog.scrollHeight;
-    }
+    // Close logic
+    const close = () => overlay.remove();
+    overlay.querySelector('.modal-close').onclick = close;
+    overlay.onclick = (e) => { if (e.target === overlay) close(); };
 
-    function parseUrls(text) {
-      return text.split('\n')
-        .map(line => line.trim())
-        .filter(line => line.length > 0)
-        .map(url => {
-          if (!url.startsWith('http://') && !url.startsWith('https://')) {
-            url = 'https://' + url;
-          }
-          try {
-            new URL(url);
-            return url;
-          } catch {
-            return null;
-          }
+    // Stage Transitions
+    btnParse.onclick = () => {
+      const urls = urlsTextarea.value.split('\n')
+        .map(u => u.trim())
+        .filter(u => u.length > 0)
+        .map(u => {
+          if (!u.startsWith('http')) u = 'https://' + u;
+          try { return new URL(u).href; } catch(e) { return null; }
         })
-        .filter(url => url !== null);
-    }
+        .filter(u => u !== null);
 
-    startBtn.addEventListener('click', async () => {
-      const urls = parseUrls(urlsTextarea.value);
-      
       if (urls.length === 0) {
-        alert('Please enter at least one valid URL');
+        alert('Please enter some valid URLs');
         return;
       }
 
-      captureDevice = deviceSelect.value;
-      captureType = typeSelect.value;
-      captureDelay = parseInt(delaySelect.value);
+      processedUrls = [...new Set(urls)]; // De-duplicate
+      renderUrlList();
+      stageInput.style.display = 'none';
+      stageConfig.style.display = 'block';
+    };
 
-      startBtn.disabled = true;
-      cancelBtn.disabled = true;
-      urlsTextarea.disabled = true;
-      progressEl.style.display = 'block';
-      
-      addLogEntry(`Starting batch capture for ${urls.length} URL(s)...`);
+    btnBack.onclick = () => {
+      stageConfig.style.display = 'none';
+      stageInput.style.display = 'block';
+    };
 
-      let successCount = 0;
-      let errorCount = 0;
+    function renderUrlList() {
+      urlList.innerHTML = processedUrls.map((url, i) => `
+        <div class="url-item">
+          <input type="checkbox" class="url-item-checkbox" data-index="${i}" checked>
+          <span class="url-item-text" title="${url}">${url}</span>
+          <span class="url-item-status pending">Pending</span>
+        </div>
+      `).join('');
+    }
 
-      for (let i = 0; i < urls.length; i++) {
-        const url = urls[i];
-        const captureTypeKey = `${captureDevice}-${captureType}`;
+    btnSelectAll.onclick = () => {
+      urlList.querySelectorAll('.url-item-checkbox').forEach(cb => cb.checked = true);
+    };
+
+    btnSelectNone.onclick = () => {
+      urlList.querySelectorAll('.url-item-checkbox').forEach(cb => cb.checked = false);
+    };
+
+    function addLog(msg, type = 'info') {
+      const div = document.createElement('div');
+      div.style.marginBottom = '4px';
+      div.style.color = type === 'error' ? '#ef4444' : type === 'success' ? '#10b981' : '#94a3b8';
+      div.textContent = `[${new Date().toLocaleTimeString()}] ${msg}`;
+      log.appendChild(div);
+      log.scrollTop = log.scrollHeight;
+    }
+
+    btnStart.onclick = async () => {
+      const selectedCheckboxes = Array.from(urlList.querySelectorAll('.url-item-checkbox:checked'));
+      if (selectedCheckboxes.length === 0) {
+        alert('Select at least one URL to capture');
+        return;
+      }
+
+      const tasks = selectedCheckboxes.map(cb => {
+        const idx = parseInt(cb.dataset.index);
+        return {
+          url: processedUrls[idx],
+          index: idx,
+          el: cb.closest('.url-item')
+        };
+      });
+
+      const device = deviceSelect.value;
+      const type = typeSelect.value;
+      const delay = parseInt(delaySelect.value);
+      const typeKey = `${device}-${type}`;
+
+      stageConfig.style.display = 'none';
+      stageProgress.style.display = 'block';
+      addLog(`Starting batch capture of ${tasks.length} target(s)...`);
+
+      let completed = 0;
+      let success = 0;
+
+      for (let task of tasks) {
+        const statusEl = task.el.querySelector('.url-item-status');
+        statusEl.textContent = 'Capture...';
+        statusEl.className = 'url-item-status pending';
         
-        progressText.textContent = `Capturing ${i + 1}/${urls.length}: ${new URL(url).hostname}`;
-        progressFill.style.width = `${((i + 1) / urls.length) * 100}%`;
-        
-        addLogEntry(`Capturing: ${url}`);
+        addLog(`Capturing ${new URL(task.url).hostname}...`);
 
         try {
           const response = await chrome.runtime.sendMessage({
             action: 'batchCaptureUrl',
-            url: url,
-            type: captureTypeKey,
-            delay: captureDelay
+            url: task.url,
+            type: typeKey,
+            delay: delay
           });
-          
+
           if (response && response.success) {
-            addLogEntry(`✓ Captured: ${new URL(url).hostname}`, 'success');
-            successCount++;
+            statusEl.textContent = 'DONE';
+            statusEl.className = 'url-item-status success';
+            addLog(`✓ Saved: ${new URL(task.url).hostname}`, 'success');
+            success++;
           } else {
-            addLogEntry(`✗ Failed: ${new URL(url).hostname} - ${response?.error || 'Unknown error'}`, 'error');
-            errorCount++;
+            statusEl.textContent = 'ERROR';
+            statusEl.className = 'url-item-status error';
+            addLog(`✗ Failed: ${new URL(task.url).hostname} (${response?.error || 'Unknown'})`, 'error');
           }
         } catch (err) {
-          addLogEntry(`✗ Error: ${err.message}`, 'error');
-          errorCount++;
+          statusEl.textContent = 'FAIL';
+          statusEl.className = 'url-item-status error';
+          addLog(`!! Error: ${err.message}`, 'error');
         }
 
-        if (i < urls.length - 1) {
-          await sleep(1500);
-        }
+        completed++;
+        const pct = Math.round((completed / tasks.length) * 100);
+        progressFill.style.width = `${pct}%`;
+        progressText.textContent = `${completed}/${tasks.length} Complete`;
+        percentageText.textContent = `${pct}%`;
+
+        // Small break between captures
+        if (completed < tasks.length) await new Promise(r => setTimeout(r, 1000));
       }
 
-      progressText.textContent = `Complete! ${successCount} succeeded, ${errorCount} failed`;
-      addLogEntry(`Batch capture complete. Success: ${successCount}, Failed: ${errorCount}`);
-      
-      startBtn.textContent = '✓ Done';
-      cancelBtn.disabled = false;
-      cancelBtn.textContent = 'Close';
-      
-      await loadScreenshots();
-    });
+      statusTitle.textContent = 'Batch Process Complete';
+      addLog(`Work finished. Success: ${success}, Failed: ${tasks.length - success}`);
+      btnClose.style.display = 'inline-flex';
+      btnClose.onclick = () => {
+        loadScreenshots();
+        close();
+      };
+    };
 
     document.body.appendChild(overlay);
   }

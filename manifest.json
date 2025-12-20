@@ -24,7 +24,8 @@
     "contextMenus",
     "tabs",
     "downloads",
-    "tabCapture"
+    "tabCapture",
+    "offscreen"
   ],
   "host_permissions": [
     "<all_urls>"

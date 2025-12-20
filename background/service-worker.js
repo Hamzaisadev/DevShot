@@ -7,7 +7,7 @@
 
 // Default settings
 const DEFAULT_SETTINGS = {
-  defaultDelay: 1000,
+  defaultDelay: 2000,
 
   freezeAnimations: true,
   hidePreloaders: true,
@@ -41,7 +41,7 @@ async function getViewports() {
   };
 }
 
-let captureDelay = 3000; // Global delay state
+let captureDelay = 5000; // Global delay state
 
 // ============================================
 // Capture Queue - Prevents race conditions
@@ -97,9 +97,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Batch capture URL - for batch website capture feature
   if (message.action === 'batchCaptureUrl') {
-    captureUrlScreenshot(message.url, message.type, message.delay)
-      .then(result => sendResponse(result))
-      .catch(error => sendResponse({ success: false, error: error.message }));
+    if (message.type === 'video') {
+      captureUrlVideo(message.url, message.delay)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+    } else {
+      captureUrlScreenshot(message.url, message.type, message.delay)
+        .then(result => sendResponse(result))
+        .catch(error => sendResponse({ success: false, error: error.message }));
+    }
     return true;
   }
 
@@ -119,7 +125,99 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Omni-Batch Capture (MV3 Fix)
+  if (message.action === 'omniBatchCapture') {
+    handleOmniBatch(message.urls, message.types, message.delay)
+      .then(result => sendResponse(result))
+      .catch(error => sendResponse({ success: false, error: error.message }));
+    return true;
+  }
+
 });
+
+async function handleOmniBatch(urls, types, delay) {
+    const total = urls.length * types.length;
+    let current = 0;
+    
+    // First: Pre-Auth Phase (Get streamIds for all videos immediately while gesture is valid)
+    const jobs = [];
+    console.log(`[DevShot Omni] Starting Pre-Auth Phase for ${urls.length} URLs`);
+    
+    for (const url of urls) {
+        for (const type of types) {
+            const isVideo = type === 'video';
+            let preAuth = null;
+            
+            if (isVideo) {
+                try {
+                    console.log(`[DevShot Omni] Pre-authorizing video for: ${url}`);
+                    // Minimal window creation for pre-auth speed
+                    const result = await createCaptureWindow(url, 1280, 800, 0); 
+                    const streamId = await chrome.tabCapture.getMediaStreamId({
+                        targetTabId: result.tab.id
+                    });
+                    
+                    if (streamId) {
+                        preAuth = {
+                            streamId,
+                            tab: result.tab,
+                            windowId: result.windowId
+                        };
+                        console.log(`[DevShot Omni] Pre-auth success for video: ${url}`);
+                        // Minimize window to keep it out of the way during pre-auth of others
+                        chrome.windows.update(result.windowId, { state: 'minimized' });
+                    }
+                } catch (e) {
+                    console.error(`[DevShot Omni] Pre-auth failed for video: ${url}`, e);
+                }
+            }
+            
+            jobs.push({ url, type, preAuth });
+        }
+    }
+    
+    // Second: Execution Phase (Sequential)
+    console.log(`[DevShot Omni] Starting Execution Phase for ${jobs.length} jobs`);
+    let success = 0;
+    
+    for (const job of jobs) {
+        current++;
+        // Update popup
+        chrome.runtime.sendMessage({
+            action: 'batchProgressUpdate',
+            current,
+            total,
+            url: job.url,
+            type: job.type
+        }).catch(() => {}); // Popup might be closed
+
+        try {
+            let res;
+            if (job.type === 'video') {
+                if (job.preAuth) {
+                    // Restore window before delay/scrolling
+                    await chrome.windows.update(job.preAuth.windowId, { state: 'normal', focused: true });
+                    // Re-run delay now that it's focused and ready for real work
+                    if (delay > 0) await sleep(delay);
+                    res = await captureUrlVideo(job.url, delay, job.preAuth);
+                } else {
+                    res = { success: false, error: 'Video pre-auth failed' };
+                }
+            } else {
+                res = await captureUrlScreenshot(job.url, job.type, delay);
+            }
+            
+            if (res.success) success++;
+        } catch (e) {
+            console.error(`[DevShot Omni] Execution failed for ${job.url}`, e);
+        }
+        
+        // Brief pause between jobs
+        await sleep(1000);
+    }
+    
+    return { success: true, count: success, total };
+}
 
 // Capture screenshot of a specific URL (for batch capture)
 async function captureUrlScreenshot(url, type, delay = 3000) {
@@ -137,6 +235,8 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
       return { success: false, error: 'Invalid URL' };
     }
 
+    console.log(`[DevShot Batch] Starting capture for: ${url} with delay: ${delay}ms`);
+
     // Determine viewport dimensions based on device
     let viewport = null;
     if (device === 'mobile') {
@@ -147,31 +247,13 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
 
     // For mobile/tablet, create a window with specific viewport
     if (viewport) {
-      const newWindow = await chrome.windows.create({
-        url: url,
-        type: 'popup',
-        width: viewport.width + 16,
-        height: viewport.height + 88,
-        left: 100,
-        top: 100,
-        focused: false
-      });
-      
-      windowId = newWindow.id;
-      const newTab = newWindow.tabs[0];
-      
-      await waitForTabLoad(newTab.id);
-      
-      // Delay for page to render (2 seconds)
-      await sleep(2000);
-      
-      // Focus window for capture
-      await chrome.windows.update(windowId, { focused: true });
-
+      const { windowId: wId, tab: newTab } = await createCaptureWindow(url, viewport.width, viewport.height, delay);
+      windowId = wId;
       
       let imageData;
       if (captureType === 'viewport') {
         imageData = await chrome.tabs.captureVisibleTab(windowId, { format: 'png' });
+        // Restore window focus if needed
       } else {
         imageData = await captureFullPage(newTab);
       }
@@ -201,28 +283,9 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
       return { success: true, filename };
       
     } else {
-      // Desktop - create tab in current window
-      const newWindow = await chrome.windows.create({
-        url: url,
-        type: 'popup',
-        width: 1400,
-        height: 900,
-        left: 100,
-        top: 100,
-        focused: false
-      });
-      
-      windowId = newWindow.id;
-      const newTab = newWindow.tabs[0];
-      
-      await waitForTabLoad(newTab.id);
-      
-      // Delay for page to render (2 seconds)
-      await sleep(2000);
-      
-      // Focus window for capture
-      await chrome.windows.update(windowId, { focused: true });
-
+      // Desktop - create tab in new window
+      const { windowId: wId, tab: newTab } = await createCaptureWindow(url, 1400, 900, delay);
+      windowId = wId;
       
       let imageData;
       if (captureType === 'viewport') {
@@ -670,34 +733,15 @@ async function captureResponsiveViewport(url, viewport, delay = 3000) {
   let windowId = null;
   
   try {
-    const newWindow = await chrome.windows.create({
-      url: url,
-      type: 'popup',
-      width: viewport.width + 16,
-      height: viewport.height + 88,
-      left: 100,
-      top: 100,
-      focused: false
-    });
+    const { windowId: wId, tab } = await createCaptureWindow(url, viewport.width, viewport.height, delay);
+    windowId = wId;
     
-    windowId = newWindow.id;
-    const newTab = newWindow.tabs[0];
-    
-    await waitForTabLoad(newTab.id);
-    
-    // Delay for page to render
-    await sleep(2000);
-    
-    // Focus and capture
-    await chrome.windows.update(windowId, { focused: true });
-    
+    // Capture
     const dataUrl = await chrome.tabs.captureVisibleTab(windowId, {
       format: 'png'
     });
     
     return dataUrl;
-
-
     
   } finally {
     if (windowId) {
@@ -712,30 +756,10 @@ async function captureResponsiveFullPage(url, viewport, delay = 3000) {
   let windowId = null;
   
   try {
-    const newWindow = await chrome.windows.create({
-      url: url,
-      type: 'popup',
-      width: viewport.width + 16,
-      height: viewport.height + 88,
-      left: 100,
-      top: 100,
-      focused: false
-    });
+    const { windowId: wId, tab } = await createCaptureWindow(url, viewport.width, viewport.height, delay);
+    windowId = wId;
     
-    windowId = newWindow.id;
-    const newTab = newWindow.tabs[0];
-    
-    await waitForTabLoad(newTab.id);
-    
-    // Delay for page to render
-    await sleep(2000);
-    
-    // Focus and capture
-    await chrome.windows.update(windowId, { focused: true });
-    
-    return await captureFullPage(newTab);
-
-
+    return await captureFullPage(tab);
     
   } finally {
     if (windowId) {
@@ -752,17 +776,19 @@ async function captureResponsiveFullPage(url, viewport, delay = 3000) {
 
 function waitForTabLoad(tabId) {
   return new Promise((resolve) => {
-    const timeout = setTimeout(() => resolve(false), 5000); // 5 sec max
+    const timeout = setTimeout(() => resolve(false), 20000); // 20 sec max
     
     const check = async () => {
       try {
         const tab = await chrome.tabs.get(tabId);
         if (tab.status === 'complete') {
+          // Extra "settle" time to catch late-load animations/elements
+          await sleep(1500); 
           clearTimeout(timeout);
           resolve(true);
           return;
         }
-        setTimeout(check, 100); // Check every 100ms
+        setTimeout(check, 200); // Check every 200ms
       } catch (e) {
         clearTimeout(timeout);
         resolve(false);
@@ -1087,4 +1113,194 @@ async function saveToGallery(screenshotData) {
     console.error('Gallery save error:', error);
     throw error;
   }
+}
+
+// Video capture using offscreen
+async function captureUrlVideo(url, delay = 5000, preAuth = null) {
+    let windowId = preAuth?.windowId || null;
+    
+    try {
+        const settings = await getSettings();
+        
+        // Create offscreen document if not exists
+        const existingContexts = await chrome.runtime.getContexts({
+            contextTypes: ['OFFSCREEN_DOCUMENT']
+        });
+
+        if (existingContexts.length === 0) {
+            await chrome.offscreen.createDocument({
+                url: 'offscreen/offscreen.html',
+                reasons: ['USER_MEDIA'],
+                justification: 'Recording tab video'
+            });
+        }
+
+        let newTab = preAuth?.tab || null;
+        let streamId = preAuth?.streamId || null;
+
+        if (!preAuth) {
+            console.log(`[DevShot Video] Creating window for video capture: ${url}`);
+            const result = await createCaptureWindow(url, 1280, 800, delay);
+            windowId = result.windowId;
+            newTab = result.tab;
+
+            console.log(`[DevShot Video] Requesting stream ID for tab: ${newTab.id}`);
+            streamId = await chrome.tabCapture.getMediaStreamId({
+                targetTabId: newTab.id
+            });
+        } else {
+            console.log(`[DevShot Video] Using pre-authorized stream for: ${url}`);
+            // If already loaded in pre-auth, we might still want to wait for the user delay
+            // but createCaptureWindow already handles delay. 
+            // If we did a minimalist pre-auth, we might need to wait here.
+            // For now, assume createCaptureWindow was called during pre-auth.
+        }
+
+        console.log(`[DevShot Video] Stream ID status: ${streamId ? 'Success' : 'Failed'}`);
+        if (!streamId) throw new Error('Failed to obtain stream ID');
+
+        // Ensure offscreen is ready (Handshake)
+        console.log('[DevShot Video] Pinging offscreen document...');
+        let ready = false;
+        for (let i = 0; i < 10; i++) {
+            try {
+                const pong = await chrome.runtime.sendMessage({ action: 'ping' });
+                if (pong && pong.success) {
+                    ready = true;
+                    break;
+                }
+            } catch (e) {}
+            await sleep(100);
+        }
+        if (!ready) throw new Error('Offscreen document failed to initialize');
+        console.log('[DevShot Video] Offscreen ready. Starting recording...');
+
+        // Start recording in offscreen
+        await chrome.runtime.sendMessage({
+            action: 'startRecording',
+            data: { streamId }
+        });
+
+        // Inject smooth rAF scroller
+        await chrome.scripting.executeScript({
+            target: { tabId: newTab.id },
+            func: () => {
+                return new Promise((resolve) => {
+                    // Disable smooth scrolling for precise control
+                    const style = document.createElement('style');
+                    style.innerHTML = '* { scroll-behavior: auto !important; }';
+                    document.head.appendChild(style);
+
+                    const getScrollMax = () => {
+                        return Math.max(
+                            document.body.scrollHeight, 
+                            document.body.offsetHeight, 
+                            document.documentElement.clientHeight, 
+                            document.documentElement.scrollHeight, 
+                            document.documentElement.offsetHeight
+                        ) - window.innerHeight;
+                    };
+
+                    const maxScroll = getScrollMax();
+                    if (maxScroll <= 0) {
+                        setTimeout(resolve, 1000); // Wait for animations
+                        return;
+                    }
+                    
+                    let current = 0;
+                    const pixelsPerFrame = 6; // Smooth speed
+                    
+                    function step() {
+                        current += pixelsPerFrame;
+                        window.scrollTo(0, current);
+                        
+                        if (current < maxScroll) {
+                            requestAnimationFrame(step);
+                        } else {
+                            // Finished scrolling
+                            setTimeout(() => {
+                                style.remove();
+                                resolve();
+                            }, 500);
+                        }
+                    }
+                    
+                    // Small delay to let initial animations settle
+                    setTimeout(() => requestAnimationFrame(step), 200);
+                });
+            }
+        });
+
+        // Stop recording
+        const response = await chrome.runtime.sendMessage({
+            action: 'stopRecording'
+        });
+
+        if (!response.success) throw new Error(response.error);
+
+        const dataUrl = response.dataUrl;
+
+        // Save
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+        const timestamp = formatTimestamp();
+        const filename = `${domain}_${timestamp}.webm`;
+
+        if (settings.autoSave) {
+            await saveToGallery({
+                filename,
+                domain,
+                device: 'desktop',
+                captureType: 'video',
+                dataUrl: dataUrl,
+                url: url,
+                timestamp: Date.now()
+            });
+        }
+
+        return { success: true, filename };
+
+    } catch (error) {
+        console.error('Video capture error:', error);
+        return { success: false, error: error.message };
+    } finally {
+        if (windowId) {
+            try { await chrome.windows.remove(windowId); } catch (e) {}
+        }
+    }
+}
+
+// Helper to create a window, wait for load, and wait for delay
+async function createCaptureWindow(url, width, height, delay) {
+    const newWindow = await chrome.windows.create({
+        url: url,
+        type: 'popup',
+        width: width + 16, // Chrome window frame padding
+        height: height + 88, // Chrome window frame padding
+        left: 100,
+        top: 100,
+        focused: true // Focus early to prevent background throttling
+    });
+    
+    const windowId = newWindow.id;
+    const newTab = newWindow.tabs[0];
+    
+    // Robust wait for load
+    const loaded = await waitForTabLoad(newTab.id);
+    if (!loaded) {
+        try { await chrome.windows.remove(windowId); } catch (e) {}
+        throw new Error('Timeout waiting for page to load');
+    }
+
+    // Ensure focused again before delay (important for throttling)
+    await chrome.windows.update(windowId, { focused: true });
+    
+    // User specified delay
+    if (delay > 0) {
+        console.log(`[DevShot] Waiting for user delay: ${delay}ms with window focused...`);
+        await sleep(delay);
+        console.log(`[DevShot] Delay complete.`);
+    }
+    
+    return { windowId, tab: newTab };
 }

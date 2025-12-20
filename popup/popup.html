@@ -32,34 +32,67 @@
       <span>before capture</span>
     </div>
 
-    <!-- Main Actions -->
-    <div class="actions">
-      <!-- Desktop Row -->
-      <div class="action-row">
-        <span class="row-label">🖥️ Desktop</span>
-        <button class="action-btn" id="btn-viewport">Viewport</button>
-        <button class="action-btn" id="btn-fullpage">Full Page</button>
-      </div>
-
-      <!-- Mobile Row -->
-      <div class="action-row">
-        <span class="row-label">📱 Mobile</span>
-        <button class="action-btn" id="btn-mobile-viewport">Viewport</button>
-        <button class="action-btn" id="btn-mobile-fullpage">Full Page</button>
-      </div>
-
-      <!-- Tablet Row -->
-      <div class="action-row">
-        <span class="row-label">📱 Tablet</span>
-        <button class="action-btn" id="btn-tablet-viewport">Viewport</button>
-        <button class="action-btn" id="btn-tablet-fullpage">Full Page</button>
+    <!-- Selection Utils -->
+    <div class="multi-header">
+      <span class="row-label">Select Formats</span>
+      <div class="multi-utils">
+        <button id="multi-select-all" class="text-link">All</button>
+        <button id="multi-select-none" class="text-link">None</button>
       </div>
     </div>
 
-    <!-- Bundle Button -->
-    <button class="bundle-btn" id="btn-bundle">
-      📦 Capture All 6
-    </button>
+    <!-- Capture Tiles Grid (Always Multi-mode) -->
+    <div class="capture-grid multi-mode" id="capture-grid">
+      <div class="tile" data-type="desktop-viewport">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+        </div>
+        <span class="tile-name">Desktop Viewport</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="desktop-fullpage">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        </div>
+        <span class="tile-name">Desktop Full Page</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="mobile-viewport">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+        </div>
+        <span class="tile-name">Mobile Viewport</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="mobile-fullpage">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        </div>
+        <span class="tile-name">Mobile Full Page</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="tablet-viewport">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
+        </div>
+        <span class="tile-name">Tablet Viewport</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="tablet-fullpage">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+        </div>
+        <span class="tile-name">Tablet Full Page</span>
+        <div class="tile-check"></div>
+      </div>
+    </div>
+
+    <!-- Multi Action Bottom -->
+    <div class="multi-action-footer">
+      <button class="bundle-btn" id="btn-bundle" disabled>
+        🚀 Capture Selected (<span id="multi-count">0</span>)
+      </button>
+    </div>
 
     <!-- Batch URLs Button -->
     <button class="batch-btn" id="btn-batch-urls">
@@ -103,9 +136,10 @@
               <label class="capture-cb"><input type="checkbox" id="cb-mobile-fullpage"> 📱 Mobile F</label>
               <label class="capture-cb"><input type="checkbox" id="cb-tablet-viewport"> 📲 Tablet V</label>
               <label class="capture-cb"><input type="checkbox" id="cb-tablet-fullpage"> 📲 Tablet F</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-video"> 🎬 Video (Scroll)</label>
             </div>
             <div class="quick-select">
-              <button type="button" class="quick-btn" id="select-all-types">All 6</button>
+              <button type="button" class="quick-btn" id="select-all-types">All</button>
               <button type="button" class="quick-btn" id="select-viewports">Viewports</button>
               <button type="button" class="quick-btn" id="select-none">None</button>
             </div>
