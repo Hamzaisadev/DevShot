@@ -40,6 +40,12 @@ document.addEventListener('DOMContentLoaded', () => {
     return parseInt(delaySelect.value) || 1000;
   }
 
+  async function getCurrentTab() {
+    let queryOptions = { active: true, currentWindow: true };
+    let [tab] = await chrome.tabs.query(queryOptions);
+    return tab;
+  }
+
 
   function showStatus(msg, type = 'loading') {
     statusEl.textContent = msg;
@@ -119,7 +125,6 @@ document.addEventListener('DOMContentLoaded', () => {
       showStatus('Error: ' + e.message, 'error');
     }
     
-    btn.classList.remove('btn-loading');
     tileEl.classList.remove('btn-loading');
     setDisabled(false);
   }
@@ -211,6 +216,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Get selected capture types from checkboxes (either modal) or tiles (main)
+  // Get selected capture types from checkboxes (either modal) or tiles (main)
   function getSelectedCaptureTypes() {
     // If modal is show, use modal checkboxes
     if (batchModal.classList.contains('show')) {
@@ -221,7 +227,9 @@ document.addEventListener('DOMContentLoaded', () => {
       if ($('cb-mobile-fullpage')?.checked) types.push('mobile-fullpage');
       if ($('cb-tablet-viewport')?.checked) types.push('tablet-viewport');
       if ($('cb-tablet-fullpage')?.checked) types.push('tablet-fullpage');
-      if ($('cb-video')?.checked) types.push('video');
+      if ($('cb-desktop-video')?.checked) types.push('desktop-video');
+      if ($('cb-laptop-video')?.checked) types.push('laptop-video');
+      if ($('cb-mobile-video')?.checked) types.push('mobile-video');
       return types;
     } else {
       // Use main UI selected tiles
@@ -231,33 +239,39 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Quick select buttons
   $('select-all-types')?.addEventListener('click', () => {
-    $('cb-desktop-viewport').checked = true;
-    $('cb-desktop-fullpage').checked = true;
-    $('cb-mobile-viewport').checked = true;
-    $('cb-mobile-fullpage').checked = true;
-    $('cb-tablet-viewport').checked = true;
-    $('cb-tablet-fullpage').checked = true;
-    if ($('cb-video')) $('cb-video').checked = true;
+    if ($('cb-desktop-viewport')) $('cb-desktop-viewport').checked = true;
+    if ($('cb-desktop-fullpage')) $('cb-desktop-fullpage').checked = true;
+    if ($('cb-mobile-viewport')) $('cb-mobile-viewport').checked = true;
+    if ($('cb-mobile-fullpage')) $('cb-mobile-fullpage').checked = true;
+    if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = true;
+    if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = true;
+    if ($('cb-desktop-video')) $('cb-desktop-video').checked = true;
+    if ($('cb-laptop-video')) $('cb-laptop-video').checked = true;
+    if ($('cb-mobile-video')) $('cb-mobile-video').checked = true;
   });
 
   $('select-viewports')?.addEventListener('click', () => {
-    $('cb-desktop-viewport').checked = true;
-    $('cb-desktop-fullpage').checked = false;
-    $('cb-mobile-viewport').checked = true;
-    $('cb-mobile-fullpage').checked = false;
-    $('cb-tablet-viewport').checked = true;
-    $('cb-tablet-fullpage').checked = false;
-    if ($('cb-video')) $('cb-video').checked = false;
+    if ($('cb-desktop-viewport')) $('cb-desktop-viewport').checked = true;
+    if ($('cb-desktop-fullpage')) $('cb-desktop-fullpage').checked = false;
+    if ($('cb-mobile-viewport')) $('cb-mobile-viewport').checked = true;
+    if ($('cb-mobile-fullpage')) $('cb-mobile-fullpage').checked = false;
+    if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = true;
+    if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = false;
+    if ($('cb-desktop-video')) $('cb-desktop-video').checked = false;
+    if ($('cb-laptop-video')) $('cb-laptop-video').checked = false;
+    if ($('cb-mobile-video')) $('cb-mobile-video').checked = false;
   });
 
   $('select-none')?.addEventListener('click', () => {
-    $('cb-desktop-viewport').checked = false;
-    $('cb-desktop-fullpage').checked = false;
-    $('cb-mobile-viewport').checked = false;
-    $('cb-mobile-fullpage').checked = false;
+    if ($('cb-desktop-viewport')) $('cb-desktop-viewport').checked = false;
+    if ($('cb-desktop-fullpage')) $('cb-desktop-fullpage').checked = false;
+    if ($('cb-mobile-viewport')) $('cb-mobile-viewport').checked = false;
+    if ($('cb-mobile-fullpage')) $('cb-mobile-fullpage').checked = false;
     if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = false;
     if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = false;
-    if ($('cb-video')) $('cb-video').checked = false;
+    if ($('cb-desktop-video')) $('cb-desktop-video').checked = false;
+    if ($('cb-laptop-video')) $('cb-laptop-video').checked = false;
+    if ($('cb-mobile-video')) $('cb-mobile-video').checked = false;
   });
 
 

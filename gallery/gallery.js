@@ -618,7 +618,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
   // Entry point for Global 'Create Showcase' button
   function createShowcase(passedScreenshots = null) {
-    const selected = passedScreenshots || screenshots.filter(s => selectedIds.has(s.id));
+    const selected = (passedScreenshots || screenshots.filter(s => selectedIds.has(s.id)))
+                     .filter(s => s.captureType !== 'video');
     // If filtering from main list and nothing selected, warn user
     if (!passedScreenshots && selected.length === 0) {
       alert('Please select at least one screenshot.');
@@ -729,6 +730,16 @@ document.addEventListener('DOMContentLoaded', () => {
         ]
       },
 
+      { id: 'product-spotlight', name: 'Spotlight', icon: '🔦', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Main Feature' },
+        { id: 1, defaultDevice: 'iphone-15-pro', label: 'Spotlight' }
+      ]},
+      { id: 'multi-device-wave', name: 'Wave Pattern', icon: '🌊', slots: [
+        { id: 0, defaultDevice: 'macbook-pro-16', label: 'Back Left' },
+        { id: 1, defaultDevice: 'ipad-pro-12', label: 'Middle' },
+        { id: 2, defaultDevice: 'iphone-15-pro', label: 'Front' },
+        { id: 3, defaultDevice: 'iphone-14', label: 'Back Right' }
+      ]},
       { id: 'custom', name: 'Custom Canvas', icon: '🎨', slots: [] }
     ];
 
@@ -759,7 +770,7 @@ document.addEventListener('DOMContentLoaded', () => {
       assignments: {}, // { 0: screenshot, 1: screenshot }
       available: hasMoreAvailable ? initialScreenshots : [...initialScreenshots],
       template: initialMode === 'single' ? 'single-device' : (initialMode === 'custom' ? 'custom' : 'surface-display'),
-      background: { type: 'gradient', value: ['#1a1a2e', '#0f3460'] },
+      background: { type: 'solid', value: 'transparent' },
       zoom: 0.8, // Start zoomed out slightly to see whole canvas
       customItems: [],
       selectedItem: null,
@@ -888,7 +899,7 @@ document.addEventListener('DOMContentLoaded', () => {
               <span>🎨</span> Save to Gallery
             </button>
             <button id="download-btn" style="padding:10px 24px;background:#6366f1;color:white;border:none;border-radius:8px;font-weight:600;cursor:pointer;box-shadow:0 4px 12px rgba(99,102,241,0.4);display:flex;align-items:center;gap:8px;">
-              <span>💾</span> Download Image
+              <span>🖼️</span> Download Image
             </button>
           </div>
           
@@ -931,13 +942,13 @@ document.addEventListener('DOMContentLoaded', () => {
     // Helpers
     function getBackgroundOptions() {
       return [
+        { name: 'None', type: 'solid', value: 'transparent', css: 'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%) #fff' },
         { name: 'Midnight', type: 'gradient', value: ['#1a1a2e', '#0f3460'], css: 'linear-gradient(135deg, #1a1a2e, #0f3460)' },
         { name: 'Purple', type: 'gradient', value: ['#667eea', '#764ba2'], css: 'linear-gradient(135deg, #667eea, #764ba2)' },
         { name: 'Sunset', type: 'gradient', value: ['#fc4a1a', '#f7b733'], css: 'linear-gradient(135deg, #fc4a1a, #f7b733)' },
         { name: 'Forest', type: 'gradient', value: ['#11998e', '#38ef7d'], css: 'linear-gradient(135deg, #11998e, #38ef7d)' },
         { name: 'Dark', type: 'solid', value: '#1a1a1a', css: '#1a1a1a' },
-        { name: 'Light', type: 'solid', value: '#f5f5f5', css: '#f5f5f5' },
-        { name: 'Transparent', type: 'solid', value: 'transparent', css: 'linear-gradient(45deg, #ccc 25%, transparent 25%), linear-gradient(-45deg, #ccc 25%, transparent 25%), linear-gradient(45deg, transparent 75%, #ccc 75%), linear-gradient(-45deg, transparent 75%, #ccc 75%) #fff' }
+        { name: 'Light', type: 'solid', value: '#f5f5f5', css: '#f5f5f5' }
       ];
     }
 
@@ -1059,7 +1070,10 @@ document.addEventListener('DOMContentLoaded', () => {
           <div class="slot-item" style="background:rgba(255,255,255,0.03);border:1px solid rgba(255,255,255,0.05);border-radius:12px;padding:16px;">
             <div style="display:flex;justify-content:space-between;margin-bottom:12px;">
               <span style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.5);text-transform:uppercase;">${slot.label}</span>
-              <span style="font-size:1.2rem;">${DEVICE_TYPES.find(d => d.id === currentDeviceId)?.icon || '📱'}</span>
+              <div style="display:flex;align-items:center;gap:8px;">
+                ${assigned ? `<button class="slot-deselect-btn" data-slot="${slot.id}" style="background:none;border:none;color:#ef4444;font-size:0.7rem;cursor:pointer;padding:0;text-decoration:underline;">Deselect</button>` : ''}
+                <span style="font-size:1.2rem;">${DEVICE_TYPES.find(d => d.id === currentDeviceId)?.icon || '📱'}</span>
+              </div>
             </div>
             
             <!-- VISUAL PICKER BUTTON -->
@@ -1121,6 +1135,16 @@ document.addEventListener('DOMContentLoaded', () => {
           updateUI(); // Re-render to update icon
         };
       });
+
+      list.querySelectorAll('.slot-deselect-btn').forEach(btn => {
+        btn.onclick = (e) => {
+          e.stopPropagation();
+          const slotId = parseInt(btn.dataset.slot);
+          state.assignments[slotId] = null;
+          render();
+          updateUI();
+        };
+      });
     }
 
     // VISUAL IMAGE SELECTOR MODAL (Smart Selection)
@@ -1129,9 +1153,10 @@ document.addEventListener('DOMContentLoaded', () => {
       const assignedIds = new Set(Object.values(state.assignments).filter(Boolean).map(s => s.id));
       state.customItems.forEach(item => { if(item.img) assignedIds.add(item.img.id); });
       
-      // Filter and sort: unassigned first, then assigned (grayed out)
-      const unassigned = state.available.filter(s => !assignedIds.has(s.id));
-      const assigned = state.available.filter(s => assignedIds.has(s.id));
+      // Filter and sort: unassigned first, then assigned (grayed out) - Images only
+      const availableImages = state.available.filter(s => s.captureType !== 'video');
+      const unassigned = availableImages.filter(s => !assignedIds.has(s.id));
+      const assigned = availableImages.filter(s => assignedIds.has(s.id));
       const sortedScreenshots = [...unassigned, ...assigned];
 
       const subOverlay = document.createElement('div');
@@ -1144,13 +1169,14 @@ document.addEventListener('DOMContentLoaded', () => {
             <button id="close-selector" style="background:none;border:none;color:white;font-size:2rem;cursor:pointer;">&times;</button>
           </div>
           <div style="flex:1;overflow-y:auto;display:grid;grid-template-columns:repeat(auto-fill, minmax(200px, 1fr));gap:16px;">
+            <div class="picker-thumb none-option" data-id="none" style="border-radius:12px;overflow:hidden;background:rgba(255,255,255,0.05);aspect-ratio:16/9;cursor:pointer;border:2px dashed rgba(255,255,255,0.2);transition:all 0.2s;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:8px;">
+              <span style="font-size:2rem;opacity:0.5;">🚫</span>
+              <span style="font-size:0.8rem;color:rgba(255,255,255,0.5);font-weight:600;">None / Remove</span>
+            </div>
             ${sortedScreenshots.map(s => {
               const isAssigned = assignedIds.has(s.id);
-              // Better aspect ratio based on device
               const aspectRatio = s.device === 'mobile' ? '9/16' : '16/10';
-              // Device emoji
               const deviceIcon = s.device === 'mobile' ? '📱' : s.device === 'tablet' ? '📲' : '🖥️';
-              // Capture type badge
               const typeLabel = s.captureType === 'fullpage' ? 'Full Page' : 'Viewport';
               const typeBg = s.captureType === 'fullpage' ? '#8b5cf6' : '#22c55e';
               
@@ -1171,13 +1197,20 @@ document.addEventListener('DOMContentLoaded', () => {
       
       subOverlay.onclick = (e) => { if(e.target === subOverlay || e.target.id === 'close-selector') subOverlay.remove(); };
       
-      subOverlay.querySelectorAll('.picker-thumb:not(.assigned)').forEach(thumb => {
+      subOverlay.querySelectorAll('.picker-thumb').forEach(thumb => {
+        if (thumb.classList.contains('assigned')) return;
+        
         thumb.onmouseenter = () => thumb.style.borderColor = '#6366f1';
-        thumb.onmouseleave = () => thumb.style.borderColor = 'transparent';
+        thumb.onmouseleave = () => thumb.style.borderColor = thumb.classList.contains('none-option') ? 'rgba(255,255,255,0.2)' : 'transparent';
+        
         thumb.onclick = () => {
-          const id = parseInt(thumb.dataset.id);
-          const s = state.available.find(x => x.id === id);
-          onSelect(s);
+          if (thumb.classList.contains('none-option')) {
+            onSelect(null);
+          } else {
+            const id = parseInt(thumb.dataset.id);
+            const s = state.available.find(x => x.id === id);
+            onSelect(s);
+          }
           subOverlay.remove();
         };
       });
@@ -1211,18 +1244,24 @@ document.addEventListener('DOMContentLoaded', () => {
 
     // DRAWING LOGIC
     async function render() {
+      // Clear canvas first
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
       // Background
-      if (state.background.type === 'gradient') {
+      if (state.background.value === 'transparent') {
+        // Already cleared
+      } else if (state.background.type === 'gradient') {
         const grd = ctx.createLinearGradient(0, 0, canvas.width, canvas.height);
         grd.addColorStop(0, state.background.value[0]);
         grd.addColorStop(1, state.background.value[1]);
         ctx.fillStyle = grd;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
       } else {
         ctx.fillStyle = state.background.value;
+        ctx.fillRect(0, 0, canvas.width, canvas.height);
       }
-      ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-      const loadImg = (s) => new Promise(r => {
+      const loadAsset = (s) => new Promise(r => {
         if (!s) return r(null);
         let i = new Image();
         i.onload = () => r(i);
@@ -1230,12 +1269,12 @@ document.addEventListener('DOMContentLoaded', () => {
         i.src = s.dataUrl;
       });
 
-      // Custom Mode
       if (state.template === 'custom') {
         for (let item of state.customItems) {
-           const img = await loadImg(item.img);
-           if(img) {
-             drawDevice(ctx, item.deviceId, img, item.x, item.y, item.w);
+           const asset = await loadAsset(item.img);
+           if(asset) {
+             drawDevice(ctx, item.deviceId, asset, item.x, item.y, item.w);
+             
              if(state.selectedItem === item) {
                // Draw selection outline
                const isPhone = item.deviceId.includes('phone') || item.deviceId.includes('pixel') || item.deviceId.includes('samsung');
@@ -1266,20 +1305,19 @@ document.addEventListener('DOMContentLoaded', () => {
              }
            }
         }
-        return;
       }
-
-
-      // Templates
-      const t = TEMPLATES.find(x => x.id === state.template);
-      
-      // Load all assigned images
-      const loaded = {}; // slotId -> img
-      for (let s of t.slots) {
-         if (state.assignments[s.id]) {
-           loaded[s.id] = await loadImg(state.assignments[s.id]);
-         }
-      }
+      else {
+        // Templates
+        const t = TEMPLATES.find(x => x.id === state.template);
+        
+        // Load all assigned assets
+        const loaded = {}; 
+        for (let s of t.slots) {
+           if (state.assignments[s.id]) {
+             const asset = await loadAsset(state.assignments[s.id]);
+             loaded[s.id] = asset;
+           }
+        }
 
 
         // Helper for text drawing
@@ -1702,20 +1740,9 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (state.template === 'feature-right') {
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 1360, 540, 900);
       }
-      // NEW: Product Spotlight - Main browser with floating phone spotlight
+      // NEW: Product Spotlight
       else if (state.template === 'product-spotlight') {
-        // Draw glow effect behind devices
-        ctx.save();
-        const gradient = ctx.createRadialGradient(960, 540, 0, 960, 540, 700);
-        gradient.addColorStop(0, 'rgba(99,102,241,0.2)');
-        gradient.addColorStop(1, 'rgba(99,102,241,0)');
-        ctx.fillStyle = gradient;
-        ctx.fillRect(0, 0, 1920, 1080);
-        ctx.restore();
-        
-        // Browser behind
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 820, 500, 1000);
-        // Phone in front
         if(loaded[1]) {
           ctx.save();
           ctx.shadowColor = 'rgba(0,0,0,0.5)';
@@ -1725,17 +1752,17 @@ document.addEventListener('DOMContentLoaded', () => {
           ctx.restore();
         }
       }
-      // NEW: Multi-Device Wave - 4 devices in a wave pattern
+      // NEW: Multi-Device Wave
       else if (state.template === 'multi-device-wave') {
-        // Draw back to front
-        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 400, 480, 700);  // Desktop back-left
-        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 850, 560, 400);  // Tablet
-        if(loaded[3]) drawDevice(ctx, getSlotDevice(3), loaded[3], 1500, 620, 240); // Phone 2 (behind Phone 1)
-        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1280, 580, 260); // Phone 1
+        if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 400, 480, 700);
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 850, 560, 400);
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1280, 580, 260);
+        if(loaded[3]) drawDevice(ctx, getSlotDevice(3), loaded[3], 1500, 620, 240);
       }
     }
+  }
 
-    // --- Events ---
+  // --- Events ---
     overlay.querySelector('#close-modal').onclick = () => overlay.remove();
     
     // Click overlay to close (but not inner content)
@@ -1921,6 +1948,7 @@ document.addEventListener('DOMContentLoaded', () => {
         }, 2000);
       }
     });
+
 
     function exportAsImage() {
       const link = document.createElement('a');
@@ -2278,7 +2306,7 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
   // Batch Website Screenshot Capture Modal
-   function openBatchCaptureModal() {
+  function openBatchCaptureModal() {
     const overlay = document.createElement('div');
     overlay.className = 'modal-overlay show';
     overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.85);backdrop-filter:blur(10px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:20px;';
@@ -2550,7 +2578,6 @@ document.addEventListener('DOMContentLoaded', () => {
 
     document.body.appendChild(overlay);
   }
-
 });
 
 // IndexedDB wrapper

@@ -85,6 +85,27 @@
         <span class="tile-name">Tablet Full Page</span>
         <div class="tile-check"></div>
       </div>
+      <div class="tile" data-type="desktop-video">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"></path><rect width="14" height="12" x="2" y="6" rx="2" ry="2"></rect></svg>
+        </div>
+        <span class="tile-name">Desktop Video</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="laptop-video">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"></path><path d="m22 8-6 4 6 4V8Z" opacity="0.5"></path></svg>
+        </div>
+        <span class="tile-name">Laptop Video</span>
+        <div class="tile-check"></div>
+      </div>
+      <div class="tile" data-type="mobile-video">
+        <div class="tile-icon">
+          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><path d="m22 8-6 4 6 4V8Z" opacity="0.5"></path></svg>
+        </div>
+        <span class="tile-name">Mobile Video</span>
+        <div class="tile-check"></div>
+      </div>
     </div>
 
     <!-- Multi Action Bottom -->
@@ -101,7 +122,7 @@
 
     <!-- Auto Scroll Capture Button -->
     <button class="record-btn" id="btn-record">
-      🎬 Auto Scroll Video
+      🎬 Post-Process Scroller
     </button>
 
     <!-- Support & Links -->
@@ -136,7 +157,10 @@
               <label class="capture-cb"><input type="checkbox" id="cb-mobile-fullpage"> 📱 Mobile F</label>
               <label class="capture-cb"><input type="checkbox" id="cb-tablet-viewport"> 📲 Tablet V</label>
               <label class="capture-cb"><input type="checkbox" id="cb-tablet-fullpage"> 📲 Tablet F</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-video"> 🎬 Video (Scroll)</label>
+              <hr style="width:100%; border:0; border-top:1px solid rgba(255,255,255,0.05); margin:8px 0;">
+              <label class="capture-cb"><input type="checkbox" id="cb-desktop-video"> 🎬 Desk Vid</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-laptop-video"> 🎬 Lap Vid</label>
+              <label class="capture-cb"><input type="checkbox" id="cb-mobile-video"> 🎬 Mob Vid</label>
             </div>
             <div class="quick-select">
               <button type="button" class="quick-btn" id="select-all-types">All</button>

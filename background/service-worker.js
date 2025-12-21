@@ -145,14 +145,20 @@ async function handleOmniBatch(urls, types, delay) {
     
     for (const url of urls) {
         for (const type of types) {
-            const isVideo = type === 'video';
+            const isVideo = type.includes('video');
             let preAuth = null;
             
             if (isVideo) {
                 try {
-                    console.log(`[DevShot Omni] Pre-authorizing video for: ${url}`);
+                    console.log(`[DevShot Omni] Pre-authorizing video (${type}) for: ${url}`);
+                    
+                    // Set dimensions based on type
+                    let w = 1280, h = 800;
+                    if (type === 'laptop-video') { w = 1024; h = 768; }
+                    else if (type === 'mobile-video') { w = 375; h = 812; }
+                    
                     // Minimal window creation for pre-auth speed
-                    const result = await createCaptureWindow(url, 1280, 800, 0); 
+                    const result = await createCaptureWindow(url, w, h, 0); 
                     const streamId = await chrome.tabCapture.getMediaStreamId({
                         targetTabId: result.tab.id
                     });
@@ -161,7 +167,9 @@ async function handleOmniBatch(urls, types, delay) {
                         preAuth = {
                             streamId,
                             tab: result.tab,
-                            windowId: result.windowId
+                            windowId: result.windowId,
+                            width: w,
+                            height: h
                         };
                         console.log(`[DevShot Omni] Pre-auth success for video: ${url}`);
                         // Minimize window to keep it out of the way during pre-auth of others
@@ -193,7 +201,7 @@ async function handleOmniBatch(urls, types, delay) {
 
         try {
             let res;
-            if (job.type === 'video') {
+            if (job.type.includes('video')) {
                 if (job.preAuth) {
                     // Restore window before delay/scrolling
                     await chrome.windows.update(job.preAuth.windowId, { state: 'normal', focused: true });
@@ -1139,8 +1147,13 @@ async function captureUrlVideo(url, delay = 5000, preAuth = null) {
         let streamId = preAuth?.streamId || null;
 
         if (!preAuth) {
-            console.log(`[DevShot Video] Creating window for video capture: ${url}`);
-            const result = await createCaptureWindow(url, 1280, 800, delay);
+            console.log(`[DevShot Video] Creating window for video capture (${type}): ${url}`);
+            
+            let w = 1280, h = 800;
+            if (type === 'laptop-video') { w = 1024; h = 768; }
+            else if (type === 'mobile-video') { w = 375; h = 812; }
+            
+            const result = await createCaptureWindow(url, w, h, delay);
             windowId = result.windowId;
             newTab = result.tab;
 
