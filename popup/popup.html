@@ -8,172 +8,150 @@
 </head>
 <body>
   <div class="app">
-    <!-- Header -->
+    <!-- Top Bar: Settings & Gallery -->
     <header class="header">
       <div class="logo-title">
         <img src="../icons/icon-48.png" alt="DevShot" class="logo-img">
-        <h1>DevShot</h1>
+        <h1 class="logo-text">DevShot</h1>
       </div>
-      <div class="header-btns">
-        <button class="icon-btn" id="btn-settings" title="Settings">⚙️</button>
-        <button class="icon-btn" id="btn-gallery" title="Gallery">🖼️</button>
+      <div class="header-actions">
+        <button class="icon-btn" id="btn-gallery" title="Gallery">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="18" height="18" x="3" y="3" rx="2" ry="2"/><circle cx="9" cy="9" r="2"/><path d="m21 15-3.086-3.086a2 2 0 0 0-2.828 0L6 21"/></svg>
+        </button>
+        <button class="icon-btn" id="btn-settings" title="Settings">
+          <svg xmlns="http://www.w3.org/2000/svg" width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.72V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.1a2 2 0 0 1-1-1.72v-.51a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.72V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>
+        </button>
       </div>
     </header>
 
-    <!-- Delay Control -->
-    <div class="delay-bar">
-      <span>Wait</span>
-      <select id="delay-select">
-        <option value="0">0s</option>
-        <option value="2000">2s</option>
-        <option value="3000" selected>3s</option>
-        <option value="5000">5s</option>
-      </select>
-      <span>before capture</span>
-    </div>
+    <!-- Main Controller -->
+    <main class="main">
+      <!-- Quick Options -->
+      <section class="section-options">
+        <div class="option-row">
+          <div class="option-label">
+            <svg xmlns="http://www.w3.org/2000/svg" width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
+            <span>Delay</span>
+          </div>
+          <select id="delay-select" class="select-minimal">
+            <option value="0">None</option>
+            <option value="2000">2s</option>
+            <option value="3000" selected>3s</option>
+            <option value="5000">5s</option>
+          </select>
+        </div>
+      </section>
 
-    <!-- Selection Utils -->
-    <div class="multi-header">
-      <span class="row-label">Select Formats</span>
-      <div class="multi-utils">
-        <button id="multi-select-all" class="text-link">All</button>
-        <button id="multi-select-none" class="text-link">None</button>
-      </div>
-    </div>
-
-    <!-- Capture Tiles Grid (Always Multi-mode) -->
-    <div class="capture-grid multi-mode" id="capture-grid">
-      <div class="tile" data-type="desktop-viewport">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"></rect><line x1="8" y1="21" x2="16" y2="21"></line><line x1="12" y1="17" x2="12" y2="21"></line></svg>
+      <!-- Capture Modes Grid -->
+      <div class="capture-section">
+        <div class="section-header">
+          <span class="section-title">Devices</span>
+          <div class="section-utils">
+            <button id="multi-select-all" class="text-btn">All</button>
+            <button id="multi-select-none" class="text-btn">Clear</button>
+          </div>
         </div>
-        <span class="tile-name">Desktop Viewport</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="desktop-fullpage">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        </div>
-        <span class="tile-name">Desktop Full Page</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="mobile-viewport">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-        </div>
-        <span class="tile-name">Mobile Viewport</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="mobile-fullpage">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        </div>
-        <span class="tile-name">Mobile Full Page</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="tablet-viewport">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="4" y="2" width="16" height="20" rx="2" ry="2"></rect><line x1="12" y1="18" x2="12.01" y2="18"></line></svg>
-        </div>
-        <span class="tile-name">Tablet Viewport</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="tablet-fullpage">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
-        </div>
-        <span class="tile-name">Tablet Full Page</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="desktop-video">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m22 8-6 4 6 4V8Z"></path><rect width="14" height="12" x="2" y="6" rx="2" ry="2"></rect></svg>
-        </div>
-        <span class="tile-name">Desktop Video</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="laptop-video">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 16V7a2 2 0 0 0-2-2H6a2 2 0 0 0-2 2v9m16 0H4m16 0 1.28 2.55a1 1 0 0 1-.9 1.45H3.62a1 1 0 0 1-.9-1.45L4 16"></path><path d="m22 8-6 4 6 4V8Z" opacity="0.5"></path></svg>
-        </div>
-        <span class="tile-name">Laptop Video</span>
-        <div class="tile-check"></div>
-      </div>
-      <div class="tile" data-type="mobile-video">
-        <div class="tile-icon">
-          <svg xmlns="http://www.w3.org/2000/svg" width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="5" y="2" width="14" height="20" rx="2" ry="2"></rect><path d="m22 8-6 4 6 4V8Z" opacity="0.5"></path></svg>
-        </div>
-        <span class="tile-name">Mobile Video</span>
-        <div class="tile-check"></div>
-      </div>
-    </div>
-
-    <!-- Multi Action Bottom -->
-    <div class="multi-action-footer">
-      <button class="bundle-btn" id="btn-bundle" disabled>
-        🚀 Capture Selected (<span id="multi-count">0</span>)
-      </button>
-    </div>
-
-    <!-- Batch URLs Button -->
-    <button class="batch-btn" id="btn-batch-urls">
-      🌐 Batch URLs
-    </button>
-
-    <!-- Auto Scroll Capture Button -->
-    <button class="record-btn" id="btn-record">
-      🎬 Post-Process Scroller
-    </button>
-
-    <!-- Support & Links -->
-    <div class="footer-support">
-      <a href="https://github.com/Hamzaisadev/DevShot" target="_blank" class="star-link">
-        ⭐ Star
-      </a>
-      <a href="https://buymeacoffee.com/albatix" target="_blank" class="support-btn">
-        ☕ Buy Me Coffee
-      </a>
-    </div>
-
-    <!-- Status -->
-    <div class="status" id="status"></div>
-
-    <!-- Batch URLs Modal -->
-    <div class="batch-modal" id="batch-modal">
-      <div class="batch-modal-content">
-        <div class="batch-header">
-          <h3>🌐 Batch Website Capture</h3>
-          <button class="batch-close" id="batch-close">✕</button>
-        </div>
-        <div class="batch-body">
-          <textarea id="batch-urls" placeholder="Enter URLs (one per line)&#10;https://example.com&#10;https://google.com" rows="4"></textarea>
-          
-          <div class="capture-types">
-            <label class="capture-type-label">Capture Types:</label>
-            <div class="capture-checkboxes">
-              <label class="capture-cb"><input type="checkbox" id="cb-desktop-viewport" checked> 🖥️ Desktop V</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-desktop-fullpage"> 🖥️ Desktop F</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-mobile-viewport" checked> 📱 Mobile V</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-mobile-fullpage"> 📱 Mobile F</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-tablet-viewport"> 📲 Tablet V</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-tablet-fullpage"> 📲 Tablet F</label>
-              <hr style="width:100%; border:0; border-top:1px solid rgba(255,255,255,0.05); margin:8px 0;">
-              <label class="capture-cb"><input type="checkbox" id="cb-desktop-video"> 🎬 Desk Vid</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-laptop-video"> 🎬 Lap Vid</label>
-              <label class="capture-cb"><input type="checkbox" id="cb-mobile-video"> 🎬 Mob Vid</label>
+        
+        <div class="capture-grid" id="capture-grid">
+          <!-- Desktop Group -->
+          <div class="device-card" data-device="desktop">
+            <div class="device-info">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="20" height="14" x="2" y="3" rx="2"/><line x1="8" x2="16" y1="21" y2="21"/><line x1="12" x2="12" y1="17" y2="21"/></svg>
+              <span>Desktop</span>
             </div>
-            <div class="quick-select">
-              <button type="button" class="quick-btn" id="select-all-types">All</button>
-              <button type="button" class="quick-btn" id="select-viewports">Viewports</button>
-              <button type="button" class="quick-btn" id="select-none">None</button>
+            <div class="device-toggles">
+              <button class="tile" data-type="desktop-viewport" title="Viewport">VP</button>
+              <button class="tile" data-type="desktop-fullpage" title="Full Page">FP</button>
             </div>
           </div>
-          
-          <div class="batch-progress" id="batch-progress"></div>
+
+          <!-- Mobile Group -->
+          <div class="device-card" data-device="mobile">
+            <div class="device-info">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="14" height="20" x="5" y="2" rx="2" ry="2"/><path d="M12 18h.01"/></svg>
+              <span>Mobile</span>
+            </div>
+            <div class="device-toggles">
+              <button class="tile" data-type="mobile-viewport" title="Viewport">VP</button>
+              <button class="tile" data-type="mobile-fullpage" title="Full Page">FP</button>
+            </div>
+          </div>
+
+          <!-- Tablet Group -->
+          <div class="device-card" data-device="tablet">
+            <div class="device-info">
+              <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect width="16" height="20" x="4" y="2" rx="2" ry="2"/><line x1="12" x2="12.01" y1="18" y2="18"/></svg>
+              <span>Tablet</span>
+            </div>
+            <div class="device-toggles">
+              <button class="tile" data-type="tablet-viewport" title="Viewport">VP</button>
+              <button class="tile" data-type="tablet-fullpage" title="Full Page">FP</button>
+            </div>
+          </div>
         </div>
-        <div class="batch-footer">
-          <button class="btn-cancel" id="batch-cancel">Cancel</button>
-          <button class="btn-start" id="batch-start">🚀 Start</button>
+      </div>
+
+      <!-- Action Footer -->
+        <button class="primary-btn" id="btn-bundle" disabled>
+          <span class="btn-shine"></span>
+          <span class="btn-text" id="bundle-text">🚀 Capture Selected (<span id="multi-count">0</span>)</span>
+        </button>
+
+        <div class="secondary-actions">
+          <button class="ghost-btn" id="btn-batch-urls">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+            <span>Batch</span>
+          </button>
+          <button class="ghost-btn" id="btn-record">
+            <svg xmlns="http://www.w3.org/2000/svg" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m16 13 5.223 3.482a.5.5 0 0 0 .777-.416V7.934a.5.5 0 0 0-.777-.416L16 11"/><rect width="12" height="12" x="2" y="6" rx="2"/></svg>
+            <span id="record-text">Scroll</span>
+          </button>
+        </div>
+      </footer>
+    </main>
+
+    <!-- Support Bar -->
+    <div class="support-bar">
+      <a href="https://github.com/Hamzaisadev/DevShot" target="_blank" class="util-link">⭐ Star</a>
+      <a href="https://buymeacoffee.com/albatix" target="_blank" class="util-link support-accent">☕ Coffee</a>
+      <span class="made-by">by Albatix</span>
+    </div>
+
+    <!-- Status Toast -->
+    <div class="status-toast" id="status"></div>
+
+    <!-- Batch Modal -->
+    <div class="modal" id="batch-modal">
+      <div class="modal-content glass-effect">
+        <div class="modal-header">
+          <h3>🌐 Batch Capture</h3>
+          <button class="close-btn" id="batch-close">✕</button>
+        </div>
+        <div class="modal-body">
+          <textarea id="batch-urls" placeholder="Enter URLs (one per line)..." rows="3"></textarea>
+          
+          <div class="type-selector">
+            <label>Capture Types:</label>
+            <div class="cb-grid">
+              <label class="cb-item"><input type="checkbox" id="cb-desktop-viewport" checked> Desktop V</label>
+              <label class="cb-item"><input type="checkbox" id="cb-desktop-fullpage"> Desktop F</label>
+              <label class="cb-item"><input type="checkbox" id="cb-mobile-viewport" checked> Mobile V</label>
+              <label class="cb-item"><input type="checkbox" id="cb-mobile-fullpage"> Mobile F</label>
+              <label class="cb-item"><input type="checkbox" id="cb-tablet-viewport"> Tablet V</label>
+              <label class="cb-item"><input type="checkbox" id="cb-tablet-fullpage"> Tablet F</label>
+              <label class="cb-item"><input type="checkbox" id="cb-video"> Video (Semi)</label>
+            </div>
+            <div class="cb-utils">
+              <button id="select-all-types" class="mini-btn">All</button>
+              <button id="select-viewports" class="mini-btn">Viewports</button>
+              <button id="select-none" class="mini-btn">None</button>
+            </div>
+          </div>
+          <div id="batch-progress" class="progress-info"></div>
+        </div>
+        <div class="modal-footer">
+          <button class="btn-outline" id="batch-cancel">Cancel</button>
+          <button class="btn-primary" id="batch-start">🚀 Start</button>
         </div>
       </div>
     </div>

@@ -47,19 +47,24 @@ document.addEventListener('DOMContentLoaded', () => {
   }
 
 
-  function showStatus(msg, type = 'loading') {
+  function showStatus(msg, type = 'info') {
     statusEl.textContent = msg;
-    statusEl.className = 'status show ' + type;
+    statusEl.className = `status-toast show ${type}`;
+    
+    // Auto-hide only for non-loading states
     if (type !== 'loading') {
-      setTimeout(() => statusEl.classList.remove('show'), 2500);
+      if (window.statusTimeout) clearTimeout(window.statusTimeout);
+      window.statusTimeout = setTimeout(() => {
+        statusEl.classList.remove('show');
+      }, 3000);
     }
   }
 
   function setDisabled(disabled) {
     busy = disabled;
-    Object.values(btns).forEach(b => {
-      if (b !== btns.gallery) b.disabled = disabled;
-    });
+    btns.bundle.disabled = disabled || selectedTiles.size === 0;
+    btns.batchUrls.disabled = disabled;
+    if ($('btn-record')) $('btn-record').disabled = disabled;
   }
 
   function updateSelectedCount() {
@@ -227,9 +232,7 @@ document.addEventListener('DOMContentLoaded', () => {
       if ($('cb-mobile-fullpage')?.checked) types.push('mobile-fullpage');
       if ($('cb-tablet-viewport')?.checked) types.push('tablet-viewport');
       if ($('cb-tablet-fullpage')?.checked) types.push('tablet-fullpage');
-      if ($('cb-desktop-video')?.checked) types.push('desktop-video');
-      if ($('cb-laptop-video')?.checked) types.push('laptop-video');
-      if ($('cb-mobile-video')?.checked) types.push('mobile-video');
+      if ($('cb-video')?.checked) types.push('video');
       return types;
     } else {
       // Use main UI selected tiles
@@ -245,9 +248,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ($('cb-mobile-fullpage')) $('cb-mobile-fullpage').checked = true;
     if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = true;
     if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = true;
-    if ($('cb-desktop-video')) $('cb-desktop-video').checked = true;
-    if ($('cb-laptop-video')) $('cb-laptop-video').checked = true;
-    if ($('cb-mobile-video')) $('cb-mobile-video').checked = true;
+    if ($('cb-video')) $('cb-video').checked = true;
   });
 
   $('select-viewports')?.addEventListener('click', () => {
@@ -257,9 +258,6 @@ document.addEventListener('DOMContentLoaded', () => {
     if ($('cb-mobile-fullpage')) $('cb-mobile-fullpage').checked = false;
     if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = true;
     if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = false;
-    if ($('cb-desktop-video')) $('cb-desktop-video').checked = false;
-    if ($('cb-laptop-video')) $('cb-laptop-video').checked = false;
-    if ($('cb-mobile-video')) $('cb-mobile-video').checked = false;
   });
 
   $('select-none')?.addEventListener('click', () => {
@@ -269,9 +267,7 @@ document.addEventListener('DOMContentLoaded', () => {
     if ($('cb-mobile-fullpage')) $('cb-mobile-fullpage').checked = false;
     if ($('cb-tablet-viewport')) $('cb-tablet-viewport').checked = false;
     if ($('cb-tablet-fullpage')) $('cb-tablet-fullpage').checked = false;
-    if ($('cb-desktop-video')) $('cb-desktop-video').checked = false;
-    if ($('cb-laptop-video')) $('cb-laptop-video').checked = false;
-    if ($('cb-mobile-video')) $('cb-mobile-video').checked = false;
+    if ($('cb-video')) $('cb-video').checked = false;
   });
 
 
@@ -289,57 +285,69 @@ document.addEventListener('DOMContentLoaded', () => {
       return;
     }
 
-    const delay = getDelay();
+    const screenshotTypes = captureTypes.filter(t => t !== 'video');
+    const hasVideo = captureTypes.includes('video');
     
     batchStart.disabled = true;
-    batchStart.textContent = '⏳ Authorizing...';
-    batchProgress.innerHTML = '<span style="color:var(--text-dim)">Pre-authorizing video captures...</span>';
+    batchStart.textContent = '⏳ Processing...';
+    
+    let successCount = 0;
 
-    // Set up progress listener
-    const progressListener = (message) => {
-      if (message.action === 'batchProgressUpdate') {
-        const { current, total, url, type } = message;
-        const hostname = new URL(url).hostname;
-        batchProgress.innerHTML = `<span>Capturing ${current}/${total}: ${hostname} (${type})...</span>`;
-        if (current === total) {
-           batchStart.textContent = '⏳ Saving...';
-        } else {
-           batchStart.textContent = '⏳ Processing...';
+    // 1. Handle Screenshots (Existing logic)
+    if (screenshotTypes.length > 0) {
+      const screenshotTotal = urls.length * screenshotTypes.length;
+      let current = 0;
+      
+      for (const url of urls) {
+        for (const type of screenshotTypes) {
+          current++;
+          const hostname = new URL(url).hostname;
+          batchProgress.innerHTML = `<span>📸 Capturing ${current}/${screenshotTotal}: ${hostname} (${type})...</span>`;
+          
+          try {
+            const res = await chrome.runtime.sendMessage({
+              action: 'batchCaptureUrl',
+              url: url,
+              type: type,
+              delay: delay
+            });
+            if (res?.success) successCount++;
+          } catch (e) {
+            console.error('Screenshot capture error:', e);
+          }
+          await new Promise(r => setTimeout(r, 500));
         }
       }
-    };
-    chrome.runtime.onMessage.addListener(progressListener);
+    }
 
-    try {
-      // Send consolidated batch request
-      const res = await chrome.runtime.sendMessage({
-        action: 'omniBatchCapture',
-        urls: urls,
-        types: captureTypes,
-        delay: delay
-      });
-      
-      if (res?.success) {
-        batchProgress.innerHTML = `<span style="color:#10b981">✓ Done! ${res.count}/${res.total} captured</span>`;
-        batchStart.textContent = '✓ Done';
-      } else {
-        batchProgress.innerHTML = `<span style="color:#ef4444">Error: ${res?.error || 'Batch failed'}</span>`;
-        batchStart.disabled = false;
-        batchStart.textContent = 'Start Capture';
+    // 2. Handle Semi-Auto Video
+    if (hasVideo) {
+      batchProgress.innerHTML = `<span>🎥 Starting Video Batch...</span>`;
+      try {
+        const res = await chrome.runtime.sendMessage({
+          action: 'startVideoBatch',
+          urls: urls,
+          delay: delay
+        });
+        if (res?.success) {
+           batchProgress.innerHTML = `<span style="color:#10b981">✓ Video batch session started! Follow tab prompts.</span>`;
+        } else {
+           batchProgress.innerHTML = `<span style="color:#ef4444">Error: ${res?.error || 'Failed to start video batch'}</span>`;
+        }
+      } catch (e) {
+        batchProgress.innerHTML = `<span style="color:#ef4444">Connection error starting video batch</span>`;
       }
-    } catch (e) {
-      console.error('Batch error:', e);
-      batchProgress.innerHTML = `<span style="color:#ef4444">Connection Error</span>`;
+    }
+
+    if (!hasVideo) {
+      batchProgress.innerHTML = `<span style="color:#10b981">✓ Done! ${successCount}/${urls.length * screenshotTypes.length} captured</span>`;
+      batchStart.textContent = '✓ Done';
       batchStart.disabled = false;
-      batchStart.textContent = 'Start Capture';
-    } finally {
-      chrome.runtime.onMessage.removeListener(progressListener);
-      // Auto-close after 3s
-      if (batchStart.textContent === '✓ Done') {
-        setTimeout(() => {
-          hideBatchModal();
-        }, 3000);
-      }
+      setTimeout(() => { hideBatchModal(); }, 3000);
+    } else {
+      batchStart.textContent = 'Running...';
+      // Keep modal open so they can see progress if needed, 
+      // but they'll be in tabs mostly.
     }
   }
 
@@ -388,7 +396,8 @@ document.addEventListener('DOMContentLoaded', () => {
                 chromeMediaSource: 'tab',
                 maxWidth: 1920,
                 maxHeight: 1080,
-                maxFrameRate: 30
+                minFrameRate: 60,
+                maxFrameRate: 60
               }
             }
           }, (stream) => {
@@ -404,7 +413,8 @@ document.addEventListener('DOMContentLoaded', () => {
 
         recordedChunks = [];
         mediaRecorder = new MediaRecorder(captureStream, {
-          mimeType: 'video/webm;codecs=vp9'
+          mimeType: 'video/webm;codecs=vp9',
+          videoBitsPerSecond: 10000000 // 10 Mbps for ultra high quality
         });
 
         mediaRecorder.ondataavailable = (e) => {
@@ -468,7 +478,7 @@ document.addEventListener('DOMContentLoaded', () => {
 
           // Reset UI
           isRecording = false;
-          recordBtn.textContent = '🎬 Auto Scroll Video';
+          if ($('record-text')) $('record-text').textContent = 'Scroll';
           recordBtn.classList.remove('recording');
           showStatus('Video saved!', 'success');
         };
@@ -476,7 +486,7 @@ document.addEventListener('DOMContentLoaded', () => {
         // Start recording
         mediaRecorder.start();
         isRecording = true;
-        recordBtn.textContent = '⏹️ Stop Recording';
+        if ($('record-text')) $('record-text').textContent = 'Stop';
         recordBtn.classList.add('recording');
 
         // Reload the page first to capture animations
@@ -485,63 +495,79 @@ document.addEventListener('DOMContentLoaded', () => {
         // Wait for page to load (3 seconds)
         await new Promise(r => setTimeout(r, 3000));
 
-        // Inject smooth scroll into the page
-        await chrome.scripting.executeScript({
-          target: { tabId: tab.id },
-          func: () => {
-            // Already at top after reload
-            
-            // Start scroll after animations play (2 sec delay)
-            setTimeout(() => {
-              // Disable CSS smooth scroll to allow fast scrolling
-              document.documentElement.style.scrollBehavior = 'auto';
-              document.body.style.scrollBehavior = 'auto';
-              
-              // ========== ADJUST SPEED HERE ==========
-              const pixelsPerStep = 12;    // Pixels to scroll each step (higher = faster)
-              const intervalMs = 16;       // Milliseconds between steps (16 = 60fps)
-              // ========================================
-              
-              let lastScrollY = -1;
-              let stuckCount = 0;
-              
-              const scrollInterval = setInterval(() => {
-                const maxScroll = document.documentElement.scrollHeight - window.innerHeight;
-                const currentScroll = window.scrollY;
+        showStatus('Recording tab... scrolling automatically', 'info');
+
+        // Inject smooth scroll into the page and await its completion
+        try {
+          await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            func: () => {
+              return new Promise((resolve) => {
+                // Disable CSS smooth scroll to allow fast scrolling
+                const style = document.createElement('style');
+                style.textContent = 'html, body { scroll-behavior: auto !important; }';
+                document.head.appendChild(style);
                 
-                // Check if reached bottom
-                if (currentScroll >= maxScroll - 5) {
-                  clearInterval(scrollInterval);
-                  return;
-                }
-                
-                // Detect if stuck (scroll position not changing)
-                if (Math.abs(currentScroll - lastScrollY) < 1) {
-                  stuckCount++;
-                  if (stuckCount > 10) {
-                    // Stuck for too long, stop
-                    clearInterval(scrollInterval);
+                const pixelsPerFrame = 6; // Slower is smoother for capture
+                let currentPos = window.scrollY;
+                let lastScrollY = -1;
+                let stuckCount = 0;
+
+                const getScrollMax = () => {
+                  return Math.max(
+                    document.body.scrollHeight,
+                    document.documentElement.scrollHeight
+                  ) - window.innerHeight;
+                };
+
+                function step() {
+                  const maxScroll = getScrollMax();
+                  const currentScroll = window.scrollY;
+
+                  // Check if reached bottom (with slight buffer)
+                  if (currentScroll >= maxScroll - 2) {
+                    style.remove();
+                    resolve({ success: true, reason: 'reached_bottom' });
                     return;
                   }
-                } else {
-                  stuckCount = 0;
-                }
-                lastScrollY = currentScroll;
-                
-                // Force instant scroll
-                window.scrollTo({ top: currentScroll + pixelsPerStep, behavior: 'instant' });
-              }, intervalMs);
-            }, 300);
-          }
-        });
 
-        showStatus('Recording tab... scrolling automatically', 'info');
+                  // Detect if stuck
+                  if (Math.abs(currentScroll - lastScrollY) < 1) {
+                    stuckCount++;
+                    if (stuckCount > 60) { // ~1s at 60fps - increased for slower sites
+                      style.remove();
+                      resolve({ success: true, reason: 'stuck' });
+                      return;
+                    }
+                  } else {
+                    stuckCount = 0;
+                  }
+                  lastScrollY = currentScroll;
+
+                  currentPos += pixelsPerFrame;
+                  window.scrollTo(0, Math.min(currentPos, maxScroll));
+                  requestAnimationFrame(step);
+                }
+
+                // Initial delay to let settle
+                setTimeout(() => requestAnimationFrame(step), 500);
+              });
+            }
+          });
+        } catch (scrollErr) {
+          console.error('Scrolling error:', scrollErr);
+        }
+
+        // Auto-stop recording if it's still running
+        if (isRecording && mediaRecorder && mediaRecorder.state !== 'inactive') {
+          mediaRecorder.stop();
+        }
 
       } catch (err) {
         console.error('Tab capture error:', err);
         showStatus('Capture failed: ' + err.message, 'error');
         isRecording = false;
-        recordBtn.textContent = '🎬 Auto Scroll Video';
+        if ($('record-text')) $('record-text').textContent = 'Scroll';
         if (captureStream) {
           captureStream.getTracks().forEach(track => track.stop());
         }
@@ -549,12 +575,4 @@ document.addEventListener('DOMContentLoaded', () => {
     };
   }
 
-  function showStatus(msg, type = 'info') {
-    statusEl.textContent = msg;
-    statusEl.className = 'status ' + type;
-    statusEl.style.display = 'block';
-    setTimeout(() => {
-      statusEl.style.display = 'none';
-    }, 3000);
-  }
 });

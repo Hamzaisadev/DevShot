@@ -658,6 +658,12 @@ document.addEventListener('DOMContentLoaded', () => {
         { id: 1, defaultDevice: 'ipad-pro-11', label: 'Left (Tablet)' },
         { id: 2, defaultDevice: 'iphone-15-pro', label: 'Right (Phone)' }
       ]},
+      { id: 'quad-showcase', name: 'Quad Device Flow', icon: '📱💻', slots: [
+        { id: 0, defaultDevice: 'none', label: 'Full Page' },
+        { id: 1, defaultDevice: 'desktop-monitor', label: 'Desktop' },
+        { id: 2, defaultDevice: 'macbook-pro-16', label: 'Laptop' },
+        { id: 3, defaultDevice: 'iphone-15-pro', label: 'Mobile' }
+      ]},
       { id: 'hero-layout', name: 'Hero Header', icon: '💎', slots: [
         { id: 0, defaultDevice: 'macbook-pro-16', label: 'Main Feature' },
         { id: 1, defaultDevice: 'iphone-15-pro', label: 'Floating Mobile' }
@@ -1153,11 +1159,9 @@ document.addEventListener('DOMContentLoaded', () => {
       const assignedIds = new Set(Object.values(state.assignments).filter(Boolean).map(s => s.id));
       state.customItems.forEach(item => { if(item.img) assignedIds.add(item.img.id); });
       
-      // Filter and sort: unassigned first, then assigned (grayed out) - Images only
+      // Show all images, but keep a record of assigned IDs for the visual badge
       const availableImages = state.available.filter(s => s.captureType !== 'video');
-      const unassigned = availableImages.filter(s => !assignedIds.has(s.id));
-      const assigned = availableImages.filter(s => assignedIds.has(s.id));
-      const sortedScreenshots = [...unassigned, ...assigned];
+      const sortedScreenshots = [...availableImages]; // No sorting needed now that everything is selectable
 
       const subOverlay = document.createElement('div');
       subOverlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.9);backdrop-filter:blur(10px);z-index:10000;display:flex;align-items:center;justify-content:center;padding:40px;';
@@ -1181,14 +1185,14 @@ document.addEventListener('DOMContentLoaded', () => {
               const typeBg = s.captureType === 'fullpage' ? '#8b5cf6' : '#22c55e';
               
               return `
-              <div class="picker-thumb ${isAssigned ? 'assigned' : ''}" data-id="${s.id}" style="border-radius:12px;overflow:hidden;background:#000;aspect-ratio:${aspectRatio};cursor:${isAssigned ? 'not-allowed' : 'pointer'};border:2px solid transparent;transition:all 0.2s;position:relative;opacity:${isAssigned ? '0.4' : '1'};max-height:200px;">
+              <div class="picker-thumb" data-id="${s.id}" style="border-radius:12px;overflow:hidden;background:#000;aspect-ratio:${aspectRatio};cursor:pointer;border:2px solid transparent;transition:all 0.2s;position:relative;max-height:200px;">
                 <img src="${s.dataUrl}" style="width:100%;height:100%;object-fit:cover;object-position:top;">
                 <div style="position:absolute;bottom:0;left:0;right:0;background:linear-gradient(transparent, rgba(0,0,0,0.9));padding:10px;">
                   <div style="font-size:0.8rem;color:white;font-weight:600;margin-bottom:4px;">${deviceIcon} ${s.device || 'desktop'}</div>
                   <div style="font-size:0.65rem;color:rgba(255,255,255,0.7);">${s.domain}</div>
                 </div>
                 <div style="position:absolute;top:8px;left:8px;background:${typeBg};color:white;padding:2px 8px;border-radius:4px;font-size:0.6rem;font-weight:600;">${typeLabel}</div>
-                ${isAssigned ? `<div style="position:absolute;top:8px;right:8px;background:#ef4444;color:white;padding:2px 8px;border-radius:4px;font-size:0.6rem;font-weight:600;">IN USE</div>` : ''}
+                ${isAssigned ? `<div style="position:absolute;top:8px;right:8px;background:rgba(99,102,241,0.8);color:white;padding:2px 8px;border-radius:4px;font-size:0.6rem;font-weight:600;">ACTIVE</div>` : ''}
               </div>
             `}).join('')}
           </div>
@@ -1198,7 +1202,6 @@ document.addEventListener('DOMContentLoaded', () => {
       subOverlay.onclick = (e) => { if(e.target === subOverlay || e.target.id === 'close-selector') subOverlay.remove(); };
       
       subOverlay.querySelectorAll('.picker-thumb').forEach(thumb => {
-        if (thumb.classList.contains('assigned')) return;
         
         thumb.onmouseenter = () => thumb.style.borderColor = '#6366f1';
         thumb.onmouseleave = () => thumb.style.borderColor = thumb.classList.contains('none-option') ? 'rgba(255,255,255,0.2)' : 'transparent';
@@ -1353,6 +1356,29 @@ document.addEventListener('DOMContentLoaded', () => {
 
       if (state.template === 'single-device') {
         if(loaded[0]) drawDevice(ctx, getSlotDevice(0), loaded[0], 960, 540, 900);
+      }
+      else if (state.template === 'quad-showcase') {
+        // Layout: Full page on left, staggered devices on right
+        if(loaded[0]) {
+            // Full page - taller and narrower
+            drawDevice(ctx, getSlotDevice(0), loaded[0], 480, 540, 550);
+        }
+        
+        // Desktop Monitor (Back right)
+        if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 1250, 380, 700);
+        
+        // Laptop (Middle right)
+        if(loaded[2]) drawDevice(ctx, getSlotDevice(2), loaded[2], 1200, 650, 650);
+        
+        // Mobile (Front right)
+        if(loaded[3]) {
+            ctx.save();
+            ctx.shadowColor = 'rgba(0,0,0,0.6)';
+            ctx.shadowBlur = 40;
+            ctx.shadowOffsetY = 20;
+            drawDevice(ctx, getSlotDevice(3), loaded[3], 1550, 750, 260);
+            ctx.restore();
+        }
       }
       else if (state.template === '3-device') {
         if(loaded[1]) drawDevice(ctx, getSlotDevice(1), loaded[1], 460, 600, 520);
@@ -1604,8 +1630,8 @@ document.addEventListener('DOMContentLoaded', () => {
       else if (state.template === 'fullpage-showcase') {
         if(loaded[0]) {
           const img = loaded[0];
-          const maxH = 900;
-          const maxW = 1400;
+          const maxH = 1040; // Maximize canvas usage
+          const maxW = 1600;
           let w = maxW;
           let h = w * (img.height / img.width);
           if (h > maxH) {
@@ -2056,7 +2082,7 @@ document.addEventListener('DOMContentLoaded', () => {
       ctx.save();
       applyShadow(30, 10);
       // Constrain height to fit in canvas (fix fullpage overflow)
-      const maxH = 900; // Leave some margin from 1080 canvas height
+      const maxH = 1040; // Maximize canvas usage
       if (h > maxH) {
         const scale = maxH / h;
         h = maxH;

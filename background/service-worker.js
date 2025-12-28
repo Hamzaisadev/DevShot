@@ -43,6 +43,14 @@ async function getViewports() {
 
 let captureDelay = 5000; // Global delay state
 
+// Batch Video State
+let videoBatchState = {
+    active: false,
+    urls: [],
+    index: 0,
+    tabId: null
+};
+
 // ============================================
 // Capture Queue - Prevents race conditions
 // ============================================
@@ -97,35 +105,29 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
   // Batch capture URL - for batch website capture feature
   if (message.action === 'batchCaptureUrl') {
-    if (message.type === 'video') {
-      captureUrlVideo(message.url, message.delay)
-        .then(result => sendResponse(result))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-    } else {
-      captureUrlScreenshot(message.url, message.type, message.delay)
-        .then(result => sendResponse(result))
-        .catch(error => sendResponse({ success: false, error: error.message }));
-    }
+    (async () => {
+      if (message.type === 'scroll-video') {
+        const tabId = message.tabId;
+        if (tabId) {
+          const result = await captureScrollVideoInCurrentTab(tabId, message.url, message.delay);
+          sendResponse(result);
+        } else {
+          sendResponse({ success: false, error: 'No tab ID provided' });
+        }
+      } else if (message.type.includes('video')) {
+        captureUrlVideo(message.url, message.type, message.delay)
+          .then(result => sendResponse(result))
+          .catch(error => sendResponse({ success: false, error: error.message }));
+      } else {
+        captureUrlScreenshot(message.url, message.type, message.delay)
+          .then(result => sendResponse(result))
+          .catch(error => sendResponse({ success: false, error: error.message }));
+      }
+    })();
     return true;
   }
 
-  // Auto scroll capture - capture frames while scrolling, download as GIF
-  if (message.action === 'autoScrollCapture') {
-    autoScrollCapture()
-      .then(result => sendResponse(result))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-
-  // Save video to gallery
-  if (message.action === 'saveVideo') {
-    saveToGallery(message.data)
-      .then(() => sendResponse({ success: true }))
-      .catch(error => sendResponse({ success: false, error: error.message }));
-    return true;
-  }
-
-  // Omni-Batch Capture (MV3 Fix)
+  // Handle omni batch capture (multiple types for a single URL)
   if (message.action === 'omniBatchCapture') {
     handleOmniBatch(message.urls, message.types, message.delay)
       .then(result => sendResponse(result))
@@ -133,98 +135,371 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     return true;
   }
 
+  // Save video from batch assistant
+  if (message.action === 'saveVideo') {
+    (async () => {
+      try {
+        const settings = await getSettings();
+        if (settings.autoSave) {
+          await saveToGallery(message.data);
+          console.log(`[DevShot] Video saved: ${message.data.filename}`);
+          sendResponse({ success: true });
+        } else {
+          sendResponse({ success: false, error: 'Auto-save is disabled' });
+        }
+      } catch (err) {
+        console.error('[DevShot] Save error:', err);
+        sendResponse({ success: false, error: err.message });
+      }
+    })();
+    return true;
+  }
+
+  // Start Video Batch (Semi-Auto)
+  if (message.action === 'startVideoBatch') {
+    videoBatchState = {
+        active: true,
+        urls: message.urls,
+        index: 0,
+        tabId: null
+    };
+    processNextVideoBatchItem();
+    sendResponse({ success: true });
+    return true;
+  }
+
+  // Next Video Batch Item
+  if (message.action === 'videoBatchNext') {
+    videoBatchState.index++;
+    processNextVideoBatchItem();
+    sendResponse({ success: true });
+    return true;
+  }
 });
+
+async function processNextVideoBatchItem() {
+    if (!videoBatchState.active) return;
+
+    if (videoBatchState.index >= videoBatchState.urls.length) {
+        console.log('[DevShot Video Batch] Finished all URLs');
+        videoBatchState.active = false;
+        // Optionally notify user or close last tab
+        return;
+    }
+
+    const url = videoBatchState.urls[videoBatchState.index];
+    console.log(`[DevShot Video Batch] Processing ${videoBatchState.index + 1}/${videoBatchState.urls.length}: ${url}`);
+
+    try {
+        let tab;
+        if (videoBatchState.tabId) {
+            // Update existing tab if it's still open
+            try {
+                tab = await chrome.tabs.update(videoBatchState.tabId, { url, active: true });
+            } catch (e) {
+                // Tab likely closed, create new
+                tab = await chrome.tabs.create({ url, active: true });
+            }
+        } else {
+            tab = await chrome.tabs.create({ url, active: true });
+        }
+
+        videoBatchState.tabId = tab.id;
+
+        // Wait for tab to load
+        await waitForTabLoad(tab.id);
+        
+        // Give it a moment to settle
+        await sleep(1000);
+
+        // Inject the batch video content script
+        await chrome.scripting.executeScript({
+            target: { tabId: tab.id },
+            files: ['content/batch-video.js']
+        });
+
+    } catch (err) {
+        console.error('[DevShot Video Batch] Error processing item:', err);
+        // Move to next anyway or stop? Let's move to next for robustness
+        videoBatchState.index++;
+        processNextVideoBatchItem();
+    }
+}
+
+
 
 async function handleOmniBatch(urls, types, delay) {
     const total = urls.length * types.length;
     let current = 0;
+    let successCount = 0;
     
-    // First: Pre-Auth Phase (Get streamIds for all videos immediately while gesture is valid)
-    const jobs = [];
-    console.log(`[DevShot Omni] Starting Pre-Auth Phase for ${urls.length} URLs`);
+    // Get current active tab - we will navigate THIS tab to each URL
+    const [activeTab] = await chrome.tabs.query({ active: true, currentWindow: true });
+    if (!activeTab) {
+        return { success: false, error: 'No active tab found' };
+    }
+    const tabId = activeTab.id;
     
+    // Process each URL/type sequentially in the SAME tab
     for (const url of urls) {
         for (const type of types) {
-            const isVideo = type.includes('video');
-            let preAuth = null;
-            
-            if (isVideo) {
-                try {
-                    console.log(`[DevShot Omni] Pre-authorizing video (${type}) for: ${url}`);
-                    
-                    // Set dimensions based on type
-                    let w = 1280, h = 800;
-                    if (type === 'laptop-video') { w = 1024; h = 768; }
-                    else if (type === 'mobile-video') { w = 375; h = 812; }
-                    
-                    // Minimal window creation for pre-auth speed
-                    const result = await createCaptureWindow(url, w, h, 0); 
-                    const streamId = await chrome.tabCapture.getMediaStreamId({
-                        targetTabId: result.tab.id
-                    });
-                    
-                    if (streamId) {
-                        preAuth = {
-                            streamId,
-                            tab: result.tab,
-                            windowId: result.windowId,
-                            width: w,
-                            height: h
-                        };
-                        console.log(`[DevShot Omni] Pre-auth success for video: ${url}`);
-                        // Minimize window to keep it out of the way during pre-auth of others
-                        chrome.windows.update(result.windowId, { state: 'minimized' });
-                    }
-                } catch (e) {
-                    console.error(`[DevShot Omni] Pre-auth failed for video: ${url}`, e);
+            current++;
+            chrome.runtime.sendMessage({ 
+                action: 'batchProgressUpdate', 
+                current, total, url, type 
+            }).catch(() => {});
+
+            try {
+                let res;
+                if (type === 'scroll-video') {
+                    // Navigate current tab and record scroll video
+                    res = await captureScrollVideoInCurrentTab(tabId, url, delay);
+                } else {
+                    // Screenshot - still uses popup window for different viewports
+                    res = await captureUrlScreenshot(url, type, delay);
                 }
+                if (res.success) successCount++;
+            } catch (e) {
+                console.error(`[DevShot Batch] Failed for ${url}:`, e);
             }
-            
-            jobs.push({ url, type, preAuth });
+            await sleep(1000);
         }
     }
     
-    // Second: Execution Phase (Sequential)
-    console.log(`[DevShot Omni] Starting Execution Phase for ${jobs.length} jobs`);
-    let success = 0;
-    
-    for (const job of jobs) {
-        current++;
-        // Update popup
-        chrome.runtime.sendMessage({
-            action: 'batchProgressUpdate',
-            current,
-            total,
-            url: job.url,
-            type: job.type
-        }).catch(() => {}); // Popup might be closed
+    return { success: true, count: successCount, total };
+}
 
-        try {
-            let res;
-            if (job.type.includes('video')) {
-                if (job.preAuth) {
-                    // Restore window before delay/scrolling
-                    await chrome.windows.update(job.preAuth.windowId, { state: 'normal', focused: true });
-                    // Re-run delay now that it's focused and ready for real work
-                    if (delay > 0) await sleep(delay);
-                    res = await captureUrlVideo(job.url, delay, job.preAuth);
-                } else {
-                    res = { success: false, error: 'Video pre-auth failed' };
-                }
-            } else {
-                res = await captureUrlScreenshot(job.url, job.type, delay);
-            }
-            
-            if (res.success) success++;
-        } catch (e) {
-            console.error(`[DevShot Omni] Execution failed for ${job.url}`, e);
+// Scroll video capture using popup window (avoids activeTab permission issues)
+async function captureScrollVideoInCurrentTab(tabId, url, delay = 3000) {
+    let windowId = null;
+    
+    try {
+        const settings = await getSettings();
+        
+        // Create offscreen document if needed
+        const existingContexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+        if (existingContexts.length === 0) {
+            await chrome.offscreen.createDocument({
+                url: 'offscreen/offscreen.html',
+                reasons: ['USER_MEDIA'],
+                justification: 'Recording tab video'
+            });
         }
         
-        // Brief pause between jobs
-        await sleep(1000);
+        // Create a new focused popup window for the URL (fixes activeTab permission issue)
+        // Use 1280x720 to fit most screens (1920x1080 can exceed screen bounds)
+        const { windowId: wId, tab: newTab } = await createCaptureWindow(url, 1280, 720, delay);
+        windowId = wId;
+        
+        // Get stream ID for the focused tab - wrapping in Promise for reliability
+        console.log(`[DevShot ScrollVideo] Requesting stream ID for tab: ${newTab.id}`);
+        const streamId = await new Promise((resolve) => {
+          chrome.tabCapture.getMediaStreamId({ targetTabId: newTab.id }, (id) => {
+            if (chrome.runtime.lastError) {
+              console.error('[DevShot ScrollVideo] getMediaStreamId error:', chrome.runtime.lastError.message);
+              resolve(null);
+            } else {
+              resolve(id);
+            }
+          });
+        });
+
+        if (!streamId) throw new Error('Failed to obtain stream ID (Check if window is focused)');
+        
+        console.log('[DevShot ScrollVideo] Starting recording...');
+        
+        // Start recording in offscreen
+        await chrome.runtime.sendMessage({ target: 'offscreen', action: 'startRecording', data: { streamId } });
+        
+        // Inject smooth scroller and wait for completion
+        await chrome.scripting.executeScript({
+            target: { tabId: newTab.id },
+            func: () => {
+                return new Promise((resolve) => {
+                    const style = document.createElement('style');
+                    style.textContent = 'html, body { scroll-behavior: auto !important; }';
+                    document.head.appendChild(style);
+                    
+                    const getMax = () => Math.max(
+                        document.body.scrollHeight,
+                        document.documentElement.scrollHeight
+                    ) - window.innerHeight;
+                    
+                    const max = getMax();
+                    if (max <= 0) { 
+                        setTimeout(resolve, 1000); 
+                        return; 
+                    }
+                    
+                    let current = 0;
+                    let lastY = -1;
+                    let stuckCount = 0;
+                    
+                    function step() {
+                        const currentY = window.scrollY;
+                        
+                        if (currentY >= max - 2) {
+                            style.remove();
+                            setTimeout(resolve, 500);
+                            return;
+                        }
+                        
+                        if (Math.abs(currentY - lastY) < 1) {
+                            stuckCount++;
+                            if (stuckCount > 60) {
+                                style.remove();
+                                setTimeout(resolve, 500);
+                                return;
+                            }
+                        } else {
+                            stuckCount = 0;
+                        }
+                        lastY = currentY;
+                        
+                        current += 6;
+                        window.scrollTo(0, Math.min(current, max));
+                        requestAnimationFrame(step);
+                    }
+                    
+                    setTimeout(() => requestAnimationFrame(step), 300);
+                });
+            }
+        });
+        
+        console.log('[DevShot ScrollVideo] Scrolling complete, stopping recording...');
+        
+        // Stop recording
+        const response = await chrome.runtime.sendMessage({ target: 'offscreen', action: 'stopRecording' });
+        if (!response.success) throw new Error(response.error);
+        
+        // Save to gallery
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+        const timestamp = formatTimestamp();
+        const filename = `${domain}_scroll_${timestamp}.webm`;
+        
+        if (settings.autoSave) {
+            await saveToGallery({
+                filename, 
+                domain, 
+                device: 'desktop', 
+                captureType: 'video',
+                dataUrl: response.dataUrl, 
+                url: url, 
+                timestamp: Date.now()
+            });
+        }
+        
+        console.log('[DevShot ScrollVideo] Saved:', filename);
+        return { success: true, filename };
+        
+    } catch (error) {
+        console.error('[DevShot ScrollVideo] Error:', error);
+        return { success: false, error: error.message };
+    } finally {
+        // Clean up the window
+        if (windowId) {
+            try { await chrome.windows.remove(windowId); } catch (e) {}
+        }
     }
+}
+
+async function captureUrlVideo(url, type, delay = 5000, preAuth = null) {
+    let windowId = preAuth?.windowId || null;
     
-    return { success: true, count: success, total };
+    try {
+        const settings = await getSettings();
+        const existingContexts = await chrome.runtime.getContexts({ contextTypes: ['OFFSCREEN_DOCUMENT'] });
+
+        if (existingContexts.length === 0) {
+            await chrome.offscreen.createDocument({
+                url: 'offscreen/offscreen.html',
+                reasons: ['USER_MEDIA'],
+                justification: 'Recording tab video'
+            });
+        }
+
+        let newTab = preAuth?.tab || null;
+        let streamId = preAuth?.streamId || null;
+
+        if (!preAuth) {
+            let w = 1280, h = 800;
+            if (type === 'laptop-video') { w = 1280; h = 800; }
+            else if (type === 'mobile-video') { w = 375; h = 812; }
+            
+            const result = await createCaptureWindow(url, w, h, delay);
+            windowId = result.windowId;
+            newTab = result.tab;
+            console.log(`[DevShot Video] Requesting stream ID for tab: ${newTab.id}`);
+            streamId = await new Promise((resolve) => {
+              chrome.tabCapture.getMediaStreamId({ targetTabId: newTab.id }, (id) => {
+                if (chrome.runtime.lastError) {
+                  console.error('[DevShot Video] getMediaStreamId error:', chrome.runtime.lastError.message);
+                  resolve(null);
+                } else {
+                  resolve(id);
+                }
+              });
+            });
+        } else {
+            await chrome.windows.update(windowId, { state: 'normal', focused: true });
+            await waitForTabLoad(newTab.id);
+            if (settings.freezeAnimations || settings.hidePreloaders) {
+                await disableAnimationsAndPreloaders(newTab.id);
+            }
+            if (delay > 0) await sleep(delay);
+        }
+
+        if (!streamId) throw new Error('Failed to obtain stream ID');
+
+        // Start recording in offscreen
+        await chrome.runtime.sendMessage({ target: 'offscreen', action: 'startRecording', data: { streamId } });
+
+        // Inject smooth rAF scroller
+        await chrome.scripting.executeScript({
+            target: { tabId: newTab.id },
+            func: () => {
+                return new Promise((resolve) => {
+                    const style = document.createElement('style');
+                    style.innerHTML = '* { scroll-behavior: auto !important; }';
+                    document.head.appendChild(style);
+                    const getMax = () => Math.max(document.body.scrollHeight, document.documentElement.scrollHeight) - window.innerHeight;
+                    const max = getMax();
+                    if (max <= 0) { setTimeout(resolve, 1000); return; }
+                    let current = 0;
+                    const step = () => {
+                        current += 6;
+                        window.scrollTo(0, current);
+                        if (current < max) requestAnimationFrame(step);
+                        else { setTimeout(() => { style.remove(); resolve(); }, 500); }
+                    };
+                    setTimeout(() => requestAnimationFrame(step), 200);
+                });
+            }
+        });
+
+        // Stop recording
+        const response = await chrome.runtime.sendMessage({ target: 'offscreen', action: 'stopRecording' });
+        if (!response.success) throw new Error(response.error);
+
+        const urlObj = new URL(url);
+        const domain = urlObj.hostname;
+        const timestamp = formatTimestamp();
+        const filename = `${domain}_${timestamp}.webm`;
+
+        if (settings.autoSave) {
+            await saveToGallery({
+                filename, domain, device: 'desktop', captureType: 'video',
+                dataUrl: response.dataUrl, url: url, timestamp: Date.now()
+            });
+        }
+        return { success: true, filename };
+    } catch (error) {
+        console.error('Video capture error:', error);
+        return { success: false, error: error.message };
+    } finally {
+        if (windowId) try { await chrome.windows.remove(windowId); } catch (e) {}
+    }
 }
 
 // Capture screenshot of a specific URL (for batch capture)
@@ -338,101 +613,7 @@ async function captureUrlScreenshot(url, type, delay = 3000) {
 }
 
 // Auto scroll capture - scroll page and capture frames
-async function autoScrollCapture() {
-  const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  if (!tab) throw new Error('No active tab');
 
-  // Get page dimensions
-  const pageInfo = await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => ({
-      scrollHeight: document.documentElement.scrollHeight,
-      viewportHeight: window.innerHeight,
-      scrollTop: window.scrollY
-    })
-  });
-
-  const { scrollHeight, viewportHeight } = pageInfo[0].result;
-  const totalScrollDistance = scrollHeight - viewportHeight;
-  
-  if (totalScrollDistance <= 0) {
-    // Page doesn't need scrolling, just capture single frame
-    const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png' });
-    const timestamp = formatTimestamp();
-    const filename = `scroll_capture_${timestamp}.png`;
-    
-    await chrome.downloads.download({
-      url: dataUrl,
-      filename: filename,
-      saveAs: false
-    });
-    
-    return { success: true, filename };
-  }
-
-  // Scroll to top first
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => window.scrollTo(0, 0)
-  });
-  await new Promise(r => setTimeout(r, 300));
-
-  // Capture frames while scrolling
-  const frames = [];
-  const scrollStep = 100; // pixels per step
-  const captureInterval = 80; // ms between captures (for ~12 fps)
-  const steps = Math.ceil(totalScrollDistance / scrollStep);
-
-  for (let i = 0; i <= steps; i++) {
-    // Capture frame
-    try {
-      const dataUrl = await chrome.tabs.captureVisibleTab(null, { format: 'png', quality: 70 });
-      frames.push(dataUrl);
-    } catch (e) {
-      console.log('Frame capture skipped');
-    }
-
-    // Scroll
-    if (i < steps) {
-      await chrome.scripting.executeScript({
-        target: { tabId: tab.id },
-        func: (step) => {
-          window.scrollBy({ top: step, behavior: 'auto' });
-        },
-        args: [scrollStep]
-      });
-      await new Promise(r => setTimeout(r, captureInterval));
-    }
-  }
-
-  // Create download - for now, download first and last frame as comparison
-  // (Full GIF encoding would require a library like gif.js)
-  const timestamp = formatTimestamp();
-  
-  // Download first frame
-  await chrome.downloads.download({
-    url: frames[0],
-    filename: `scroll_start_${timestamp}.png`,
-    saveAs: false
-  });
-  
-  // Download last frame
-  if (frames.length > 1) {
-    await chrome.downloads.download({
-      url: frames[frames.length - 1],
-      filename: `scroll_end_${timestamp}.png`,
-      saveAs: false
-    });
-  }
-
-  // Scroll back to top
-  await chrome.scripting.executeScript({
-    target: { tabId: tab.id },
-    func: () => window.scrollTo({ top: 0, behavior: 'smooth' })
-  });
-
-  return { success: true, framesCount: frames.length, message: `Captured ${frames.length} frames` };
-}
 
 // ============================================
 // Context Menu Setup
@@ -1124,164 +1305,7 @@ async function saveToGallery(screenshotData) {
 }
 
 // Video capture using offscreen
-async function captureUrlVideo(url, delay = 5000, preAuth = null) {
-    let windowId = preAuth?.windowId || null;
-    
-    try {
-        const settings = await getSettings();
-        
-        // Create offscreen document if not exists
-        const existingContexts = await chrome.runtime.getContexts({
-            contextTypes: ['OFFSCREEN_DOCUMENT']
-        });
 
-        if (existingContexts.length === 0) {
-            await chrome.offscreen.createDocument({
-                url: 'offscreen/offscreen.html',
-                reasons: ['USER_MEDIA'],
-                justification: 'Recording tab video'
-            });
-        }
-
-        let newTab = preAuth?.tab || null;
-        let streamId = preAuth?.streamId || null;
-
-        if (!preAuth) {
-            console.log(`[DevShot Video] Creating window for video capture (${type}): ${url}`);
-            
-            let w = 1280, h = 800;
-            if (type === 'laptop-video') { w = 1024; h = 768; }
-            else if (type === 'mobile-video') { w = 375; h = 812; }
-            
-            const result = await createCaptureWindow(url, w, h, delay);
-            windowId = result.windowId;
-            newTab = result.tab;
-
-            console.log(`[DevShot Video] Requesting stream ID for tab: ${newTab.id}`);
-            streamId = await chrome.tabCapture.getMediaStreamId({
-                targetTabId: newTab.id
-            });
-        } else {
-            console.log(`[DevShot Video] Using pre-authorized stream for: ${url}`);
-            // If already loaded in pre-auth, we might still want to wait for the user delay
-            // but createCaptureWindow already handles delay. 
-            // If we did a minimalist pre-auth, we might need to wait here.
-            // For now, assume createCaptureWindow was called during pre-auth.
-        }
-
-        console.log(`[DevShot Video] Stream ID status: ${streamId ? 'Success' : 'Failed'}`);
-        if (!streamId) throw new Error('Failed to obtain stream ID');
-
-        // Ensure offscreen is ready (Handshake)
-        console.log('[DevShot Video] Pinging offscreen document...');
-        let ready = false;
-        for (let i = 0; i < 10; i++) {
-            try {
-                const pong = await chrome.runtime.sendMessage({ action: 'ping' });
-                if (pong && pong.success) {
-                    ready = true;
-                    break;
-                }
-            } catch (e) {}
-            await sleep(100);
-        }
-        if (!ready) throw new Error('Offscreen document failed to initialize');
-        console.log('[DevShot Video] Offscreen ready. Starting recording...');
-
-        // Start recording in offscreen
-        await chrome.runtime.sendMessage({
-            action: 'startRecording',
-            data: { streamId }
-        });
-
-        // Inject smooth rAF scroller
-        await chrome.scripting.executeScript({
-            target: { tabId: newTab.id },
-            func: () => {
-                return new Promise((resolve) => {
-                    // Disable smooth scrolling for precise control
-                    const style = document.createElement('style');
-                    style.innerHTML = '* { scroll-behavior: auto !important; }';
-                    document.head.appendChild(style);
-
-                    const getScrollMax = () => {
-                        return Math.max(
-                            document.body.scrollHeight, 
-                            document.body.offsetHeight, 
-                            document.documentElement.clientHeight, 
-                            document.documentElement.scrollHeight, 
-                            document.documentElement.offsetHeight
-                        ) - window.innerHeight;
-                    };
-
-                    const maxScroll = getScrollMax();
-                    if (maxScroll <= 0) {
-                        setTimeout(resolve, 1000); // Wait for animations
-                        return;
-                    }
-                    
-                    let current = 0;
-                    const pixelsPerFrame = 6; // Smooth speed
-                    
-                    function step() {
-                        current += pixelsPerFrame;
-                        window.scrollTo(0, current);
-                        
-                        if (current < maxScroll) {
-                            requestAnimationFrame(step);
-                        } else {
-                            // Finished scrolling
-                            setTimeout(() => {
-                                style.remove();
-                                resolve();
-                            }, 500);
-                        }
-                    }
-                    
-                    // Small delay to let initial animations settle
-                    setTimeout(() => requestAnimationFrame(step), 200);
-                });
-            }
-        });
-
-        // Stop recording
-        const response = await chrome.runtime.sendMessage({
-            action: 'stopRecording'
-        });
-
-        if (!response.success) throw new Error(response.error);
-
-        const dataUrl = response.dataUrl;
-
-        // Save
-        const urlObj = new URL(url);
-        const domain = urlObj.hostname;
-        const timestamp = formatTimestamp();
-        const filename = `${domain}_${timestamp}.webm`;
-
-        if (settings.autoSave) {
-            await saveToGallery({
-                filename,
-                domain,
-                device: 'desktop',
-                captureType: 'video',
-                dataUrl: dataUrl,
-                url: url,
-                timestamp: Date.now()
-            });
-        }
-
-        return { success: true, filename };
-
-    } catch (error) {
-        console.error('Video capture error:', error);
-        return { success: false, error: error.message };
-    } finally {
-        if (windowId) {
-            try { await chrome.windows.remove(windowId); } catch (e) {}
-        }
-    }
-}
 
 // Helper to create a window, wait for load, and wait for delay
 async function createCaptureWindow(url, width, height, delay) {
